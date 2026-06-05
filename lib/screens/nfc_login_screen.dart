@@ -155,24 +155,34 @@ class _NfcLoginScreenState extends State<NfcLoginScreen> with SingleTickerProvid
       _statusMessage = "Authenticating card...";
     });
 
-    final provider = context.read<AttendanceProvider>();
-    final success = await provider.loginWithNfc(cardUid);
+    try {
+      final provider = context.read<AttendanceProvider>();
+      final success = await provider.loginWithNfc(cardUid);
 
-    if (mounted) {
-      setState(() {
-        _isProcessing = false;
-      });
-
-      if (success) {
-        Navigator.pushReplacement(
-          context,
-          MaterialPageRoute(builder: (_) => const MainScreen()),
-        );
-      } else {
+      if (mounted) {
         setState(() {
-          _errorMessage = "Invalid card (UID: $cardUid). This NFC card is not registered to any lecturer.";
+          _isProcessing = false;
         });
-        // Restart NFC listening for retry
+
+        if (success) {
+          Navigator.pushReplacement(
+            context,
+            MaterialPageRoute(builder: (_) => const MainScreen()),
+          );
+        } else {
+          setState(() {
+            _errorMessage = "Invalid card (UID: $cardUid). This NFC card is not registered to any lecturer.";
+          });
+          // Restart NFC listening for retry
+          _startNfcSession();
+        }
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          _isProcessing = false;
+          _errorMessage = "Authentication failed: $e";
+        });
         _startNfcSession();
       }
     }
