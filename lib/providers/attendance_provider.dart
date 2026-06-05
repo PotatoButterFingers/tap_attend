@@ -154,14 +154,46 @@ class AttendanceProvider with ChangeNotifier {
       await NfcManager.instance.startSession(
         pollingOptions: {NfcPollingOption.iso14443, NfcPollingOption.iso15693},
         onDiscovered: (NfcTag tag) async {
-          // Assume we get identifier from tag. For simulation:
-          handleScannedTag('tag_1');
+          final uid = _extractTagUid(tag);
+          if (uid != null) {
+            handleScannedTag(uid);
+          } else {
+            scanMessage = "Failed to parse card ID";
+            notifyListeners();
+          }
         },
       );
     } catch (e) {
       scanMessage = "Error initializing NFC";
       notifyListeners();
     }
+  }
+
+  String? _extractTagUid(NfcTag tag) {
+    // ignore: invalid_use_of_protected_member
+    final Map<dynamic, dynamic> data = tag.data as Map<dynamic, dynamic>;
+    List<dynamic>? identifier;
+
+    if (data.containsKey('nfca')) {
+      identifier = (data['nfca'] as Map?)?['identifier'];
+    } else if (data.containsKey('mifareultralight')) {
+      identifier = (data['mifareultralight'] as Map?)?['identifier'];
+    } else if (data.containsKey('nfcb')) {
+      identifier = (data['nfcb'] as Map?)?['identifier'];
+    } else if (data.containsKey('nfcv')) {
+      identifier = (data['nfcv'] as Map?)?['identifier'];
+    } else if (data.containsKey('nfcf')) {
+      identifier = (data['nfcf'] as Map?)?['identifier'];
+    } else if (data.containsKey('isodep')) {
+      identifier = (data['isodep'] as Map?)?['identifier'];
+    }
+
+    if (identifier != null) {
+      return identifier
+          .map((e) => (e as int).toRadixString(16).padLeft(2, '0').toUpperCase())
+          .join(':');
+    }
+    return null;
   }
 
   void stopNfcScanning() {
@@ -185,7 +217,7 @@ class AttendanceProvider with ChangeNotifier {
     if (matchIdx != -1) {
       _markStudentPresent(currentSession!.students[matchIdx]);
     } else {
-      scanMessage = "Unrecognized Student Card";
+      scanMessage = "Unrecognized Student Card\nUID: $deviceId";
       notifyListeners();
     }
   }
