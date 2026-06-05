@@ -985,6 +985,10 @@ class AttendanceProvider with ChangeNotifier {
   }
 
   Future<bool> loginLecturer(String lecturerId, String password) async {
+    if (initializationFuture != null) {
+      await initializationFuture;
+    }
+
     final idClean = lecturerId.trim().toLowerCase();
     final pwdClean = password.trim();
 
