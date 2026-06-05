@@ -43,13 +43,18 @@ class AttendanceProvider with ChangeNotifier {
 
     serverIp = prefs.getString('serverIp') ?? '10.0.2.2';
 
+    cachedLecturerId = prefs.getString('cachedLecturerId');
+    cachedPassword = prefs.getString('cachedPassword');
+
     // Load lecturer profile
     final lecturerJson = prefs.getString('lecturer');
     if (lecturerJson != null) {
-      lecturer = Lecturer.fromJson(jsonDecode(lecturerJson));
+      var parsedLecturer = Lecturer.fromJson(jsonDecode(lecturerJson));
+      if (parsedLecturer.id.isEmpty && cachedLecturerId != null) {
+        parsedLecturer = parsedLecturer.copyWith(id: cachedLecturerId);
+      }
+      lecturer = parsedLecturer;
     }
-    cachedLecturerId = prefs.getString('cachedLecturerId');
-    cachedPassword = prefs.getString('cachedPassword');
 
     // Load past sessions
     final pastSessionsJson = prefs.getStringList('pastSessions');
@@ -1076,7 +1081,11 @@ class AttendanceProvider with ChangeNotifier {
           final prefs = await SharedPreferences.getInstance();
           final lecturerJson = prefs.getString('cachedLecturer') ?? prefs.getString('lecturer');
           if (lecturerJson != null) {
-            lecturer = Lecturer.fromJson(jsonDecode(lecturerJson));
+            var parsed = Lecturer.fromJson(jsonDecode(lecturerJson));
+            if (parsed.id.isEmpty && cachedLecturerId != null) {
+              parsed = parsed.copyWith(id: cachedLecturerId);
+            }
+            lecturer = parsed;
           }
         }
         notifyListeners();
