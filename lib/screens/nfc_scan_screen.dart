@@ -58,20 +58,20 @@ class _NfcScanScreenState extends State<NfcScanScreen> with SingleTickerProvider
       body: SafeArea(
         child: Column(
         children: [
-          const SizedBox(height: 16),
+          const SizedBox(height: 8),
           Text(
             '${session.subjectCode} - ${session.room}',
-            style: Theme.of(context).textTheme.titleLarge?.copyWith(fontSize: 20),
+            style: Theme.of(context).textTheme.titleLarge?.copyWith(fontSize: 18),
             textAlign: TextAlign.center,
           ),
-          const SizedBox(height: 8),
+          const SizedBox(height: 4),
           Text(session.subjectName, style: Theme.of(context).textTheme.bodyMedium),
           
-          const SizedBox(height: 48),
+          const SizedBox(height: 16),
           
-          // Pulsing NFC Icon
+          // Pulsing NFC Icon (Slightly smaller to prevent overflow)
           SizedBox(
-            height: 220, // Fixed height to prevent layout shifts
+            height: 160, // Fixed height to prevent layout shifts
             child: Stack(
               alignment: Alignment.center,
               children: [
@@ -79,8 +79,8 @@ class _NfcScanScreenState extends State<NfcScanScreen> with SingleTickerProvider
                   animation: _pulseController,
                   builder: (context, child) {
                     return Container(
-                      width: 160 + (_pulseController.value * 50),
-                      height: 160 + (_pulseController.value * 50),
+                      width: 120 + (_pulseController.value * 30),
+                      height: 120 + (_pulseController.value * 30),
                       decoration: BoxDecoration(
                         shape: BoxShape.circle,
                         color: Theme.of(context).primaryColor.withValues(alpha: 0.1 - (_pulseController.value * 0.1)),
@@ -92,8 +92,8 @@ class _NfcScanScreenState extends State<NfcScanScreen> with SingleTickerProvider
                   animation: _pulseController,
                   builder: (context, child) {
                     return Container(
-                      width: 120 + (_pulseController.value * 20),
-                      height: 120 + (_pulseController.value * 20),
+                      width: 95 + (_pulseController.value * 15),
+                      height: 95 + (_pulseController.value * 15),
                       decoration: BoxDecoration(
                         shape: BoxShape.circle,
                         color: Theme.of(context).primaryColor.withValues(alpha: 0.2 - (_pulseController.value * 0.2)),
@@ -102,29 +102,29 @@ class _NfcScanScreenState extends State<NfcScanScreen> with SingleTickerProvider
                   },
                 ),
                 Container(
-                  width: 100,
-                  height: 100,
+                  width: 80,
+                  height: 80,
                   decoration: BoxDecoration(
                     color: Theme.of(context).primaryColor,
                     shape: BoxShape.circle,
                     boxShadow: [
                       BoxShadow(
                         color: Theme.of(context).primaryColor.withValues(alpha: 0.4),
-                        blurRadius: 20,
-                        spreadRadius: 5,
+                        blurRadius: 15,
+                        spreadRadius: 3,
                       ),
                     ],
                   ),
-                  child: const Icon(Icons.wifi_tethering, color: Colors.white, size: 48),
+                  child: const Icon(Icons.wifi_tethering, color: Colors.white, size: 36),
                 ),
               ],
             ),
           ),
           
-          const SizedBox(height: 32),
+          const SizedBox(height: 16),
           Text(
             provider.scanMessage ?? 'Waiting...',
-            style: Theme.of(context).textTheme.titleLarge,
+            style: Theme.of(context).textTheme.titleLarge?.copyWith(fontSize: 20),
             textAlign: TextAlign.center,
           ),
           const SizedBox(height: 8),
@@ -137,7 +137,7 @@ class _NfcScanScreenState extends State<NfcScanScreen> with SingleTickerProvider
             ),
           ),
           
-          const SizedBox(height: 48),
+          const SizedBox(height: 16),
           
           // List Bottom Sheet Area
           Expanded(
