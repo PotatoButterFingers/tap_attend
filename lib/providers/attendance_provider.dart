@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:nfc_manager/nfc_manager.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:http/http.dart' as http;
 import 'package:tap_attend/models/class_session.dart';
 import 'package:tap_attend/models/student.dart';
 import 'package:tap_attend/models/lecturer.dart';
@@ -31,6 +32,7 @@ class AttendanceProvider with ChangeNotifier {
   List<String> deletedStudentIds = []; // Local deleted student IDs
   bool isServerOnline = true; // Simulated connection state (User can toggle in Sync Screen)
   String? activeLateSessionId; // If set, NFC scans record late attendance for this past session instead of currentSession
+  String serverIp = '10.0.2.2'; // Use 10.0.2.2 for Android emulator gateway, localhost for iOS, or computer's local IP (e.g. 192.168.x.x) for physical phones
 
   AttendanceProvider() {
     _loadData();
@@ -378,14 +380,11 @@ class AttendanceProvider with ChangeNotifier {
   Future<bool> _trySyncStudentToXampp(String id, String name, String cardUid, String subjectCode) async {
     if (!isServerOnline) return false;
     try {
-      // ACTUAL INTEGRATION:
-      // final response = await http.post(
-      //   Uri.parse('http://<xampp_ip>/tap_attend/api/register_student.php'),
-      //   body: {'id': id, 'name': name, 'deviceId': cardUid, 'subjectCode': subjectCode},
-      // ).timeout(const Duration(seconds: 3));
-      // return response.statusCode == 200;
-      await Future.delayed(const Duration(milliseconds: 600));
-      return true;
+      final response = await http.post(
+        Uri.parse('http://$serverIp/tap_attend/api/register_student.php'),
+        body: {'id': id, 'name': name, 'deviceId': cardUid, 'subjectCode': subjectCode},
+      ).timeout(const Duration(seconds: 3));
+      return response.statusCode == 200;
     } catch (_) {
       return false;
     }
@@ -394,14 +393,11 @@ class AttendanceProvider with ChangeNotifier {
   Future<bool> _trySyncDeleteToXampp(String studentId) async {
     if (!isServerOnline) return false;
     try {
-      // ACTUAL INTEGRATION:
-      // final response = await http.post(
-      //   Uri.parse('http://<xampp_ip>/tap_attend/api/delete_student.php'),
-      //   body: {'id': studentId},
-      // ).timeout(const Duration(seconds: 3));
-      // return response.statusCode == 200;
-      await Future.delayed(const Duration(milliseconds: 600));
-      return true;
+      final response = await http.post(
+        Uri.parse('http://$serverIp/tap_attend/api/delete_student.php'),
+        body: {'id': studentId},
+      ).timeout(const Duration(seconds: 3));
+      return response.statusCode == 200;
     } catch (_) {
       return false;
     }
@@ -410,15 +406,12 @@ class AttendanceProvider with ChangeNotifier {
   Future<bool> _trySyncSessionToXampp(ClassSession session) async {
     if (!isServerOnline) return false;
     try {
-      // ACTUAL INTEGRATION:
-      // final response = await http.post(
-      //   Uri.parse('http://<xampp_ip>/tap_attend/api/submit_attendance.php'),
-      //   headers: {'Content-Type': 'application/json'},
-      //   body: jsonEncode(session.toJson()),
-      // ).timeout(const Duration(seconds: 3));
-      // return response.statusCode == 200;
-      await Future.delayed(const Duration(milliseconds: 800));
-      return true;
+      final response = await http.post(
+        Uri.parse('http://$serverIp/tap_attend/api/submit_attendance.php'),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode(session.toJson()),
+      ).timeout(const Duration(seconds: 3));
+      return response.statusCode == 200;
     } catch (_) {
       return false;
     }
@@ -743,8 +736,11 @@ class AttendanceProvider with ChangeNotifier {
   Future<bool> _trySyncDeleteSessionToXampp(String sessionId) async {
     if (!isServerOnline) return false;
     try {
-      await Future.delayed(const Duration(milliseconds: 400));
-      return true;
+      final response = await http.post(
+        Uri.parse('http://$serverIp/tap_attend/api/delete_session.php'),
+        body: {'id': sessionId},
+      ).timeout(const Duration(seconds: 3));
+      return response.statusCode == 200;
     } catch (_) {
       return false;
     }
@@ -753,8 +749,10 @@ class AttendanceProvider with ChangeNotifier {
   Future<bool> _trySyncClearAllSessionsToXampp() async {
     if (!isServerOnline) return false;
     try {
-      await Future.delayed(const Duration(milliseconds: 600));
-      return true;
+      final response = await http.post(
+        Uri.parse('http://$serverIp/tap_attend/api/clear_all_sessions.php'),
+      ).timeout(const Duration(seconds: 3));
+      return response.statusCode == 200;
     } catch (_) {
       return false;
     }
