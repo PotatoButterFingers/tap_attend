@@ -71,6 +71,15 @@ class _NfcLoginScreenState extends State<NfcLoginScreen> with SingleTickerProvid
         },
         onDiscovered: (NfcTag tag) async {
           final uid = _extractTagUid(tag);
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: Text(uid != null ? 'Card detected! UID: $uid' : 'Card detected, but failed to parse UID.'),
+                backgroundColor: uid != null ? Colors.blue : Colors.orange,
+                duration: const Duration(seconds: 2),
+              ),
+            );
+          }
           if (uid != null) {
             await _handleNfcLogin(uid);
           } else {
@@ -149,6 +158,13 @@ class _NfcLoginScreenState extends State<NfcLoginScreen> with SingleTickerProvid
     await _stopNfcSession();
     if (!mounted) return;
 
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text('Starting authentication for UID: $cardUid...'),
+        duration: const Duration(seconds: 2),
+      ),
+    );
+
     setState(() {
       _isProcessing = true;
       _errorMessage = null;
@@ -157,12 +173,28 @@ class _NfcLoginScreenState extends State<NfcLoginScreen> with SingleTickerProvid
 
     try {
       final provider = context.read<AttendanceProvider>();
+      
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Server connection: ${provider.isServerConnectionActive ? "Active (IP: ${provider.serverIp})" : "Inactive (Offline fallback)"}'),
+          duration: const Duration(seconds: 2),
+        ),
+      );
+
       final success = await provider.loginWithNfc(cardUid);
 
       if (mounted) {
         setState(() {
           _isProcessing = false;
         });
+
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(success ? 'NFC login successful!' : 'NFC login failed: Card not registered.'),
+            backgroundColor: success ? Colors.green : Colors.red,
+            duration: const Duration(seconds: 2),
+          ),
+        );
 
         if (success) {
           Navigator.pushReplacement(
@@ -183,6 +215,13 @@ class _NfcLoginScreenState extends State<NfcLoginScreen> with SingleTickerProvid
           _isProcessing = false;
           _errorMessage = "Authentication failed: $e";
         });
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Error: $e'),
+            backgroundColor: Colors.red,
+            duration: const Duration(seconds: 4),
+          ),
+        );
         _startNfcSession();
       }
     }
