@@ -681,7 +681,11 @@ class AttendanceProvider with ChangeNotifier {
       }
 
       await NfcManager.instance.startSession(
-        pollingOptions: {NfcPollingOption.iso14443, NfcPollingOption.iso15693},
+        pollingOptions: {
+          NfcPollingOption.iso14443,
+          NfcPollingOption.iso15693,
+          if (Platform.isAndroid) NfcPollingOption.iso18092,
+        },
         onDiscovered: (NfcTag tag) async {
           final uid = _extractTagUid(tag);
           if (uid != null) {
@@ -703,18 +707,38 @@ class AttendanceProvider with ChangeNotifier {
     final Map<dynamic, dynamic> data = tag.data as Map<dynamic, dynamic>;
     List<dynamic>? identifier;
 
-    if (data.containsKey('nfca')) {
-      identifier = (data['nfca'] as Map?)?['identifier'];
-    } else if (data.containsKey('mifareultralight')) {
-      identifier = (data['mifareultralight'] as Map?)?['identifier'];
-    } else if (data.containsKey('nfcb')) {
-      identifier = (data['nfcb'] as Map?)?['identifier'];
-    } else if (data.containsKey('nfcv')) {
-      identifier = (data['nfcv'] as Map?)?['identifier'];
-    } else if (data.containsKey('nfcf')) {
-      identifier = (data['nfcf'] as Map?)?['identifier'];
-    } else if (data.containsKey('isodep')) {
-      identifier = (data['isodep'] as Map?)?['identifier'];
+    // 1. Dynamic check: search all keys that contain a Map and have 'identifier'
+    for (final value in data.values) {
+      if (value is Map && value.containsKey('identifier')) {
+        final id = value['identifier'];
+        if (id is List) {
+          identifier = id;
+          break;
+        }
+      }
+    }
+
+    // 2. Explicit fallbacks
+    if (identifier == null) {
+      if (data.containsKey('nfca')) {
+        identifier = (data['nfca'] as Map?)?['identifier'];
+      } else if (data.containsKey('mifareclassic')) {
+        identifier = (data['mifareclassic'] as Map?)?['identifier'];
+      } else if (data.containsKey('mifareultralight')) {
+        identifier = (data['mifareultralight'] as Map?)?['identifier'];
+      } else if (data.containsKey('mifare')) {
+        identifier = (data['mifare'] as Map?)?['identifier'];
+      } else if (data.containsKey('nfcb')) {
+        identifier = (data['nfcb'] as Map?)?['identifier'];
+      } else if (data.containsKey('nfcv')) {
+        identifier = (data['nfcv'] as Map?)?['identifier'];
+      } else if (data.containsKey('nfcf')) {
+        identifier = (data['nfcf'] as Map?)?['identifier'];
+      } else if (data.containsKey('isodep')) {
+        identifier = (data['isodep'] as Map?)?['identifier'];
+      } else if (data.containsKey('ndef')) {
+        identifier = (data['ndef'] as Map?)?['identifier'];
+      }
     }
 
     if (identifier != null) {
