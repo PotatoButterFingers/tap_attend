@@ -232,14 +232,17 @@ class _DashboardScreenState extends State<DashboardScreen> {
                         color: Theme.of(context).primaryColor,
                         borderRadius: BorderRadius.circular(16),
                       ),
-                      child: const Column(
+                      child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          Icon(Icons.people, color: Colors.white),
-                          SizedBox(height: 12),
-                          Text('Total Students', style: TextStyle(color: Colors.white70, fontSize: 12)),
-                          SizedBox(height: 4),
-                          Text('142', style: TextStyle(color: Colors.white, fontSize: 24, fontWeight: FontWeight.bold)),
+                          const Icon(Icons.people, color: Colors.white),
+                          const SizedBox(height: 12),
+                          const Text('Total Students', style: TextStyle(color: Colors.white70, fontSize: 12)),
+                          const SizedBox(height: 4),
+                          Text(
+                            '${context.watch<AttendanceProvider>().allStudentsInDirectory.length}',
+                            style: const TextStyle(color: Colors.white, fontSize: 24, fontWeight: FontWeight.bold),
+                          ),
                         ],
                       ),
                     ),
