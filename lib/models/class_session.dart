@@ -1,4 +1,5 @@
 import 'package:tap_attend/models/student.dart';
+import 'package:tap_attend/utils/date_parser.dart';
 
 class ClassSession {
   final String id;
@@ -80,10 +81,10 @@ class ClassSession {
       subjectCode: json['subjectCode'],
       subjectName: json['subjectName'],
       room: json['room'],
-      startTime: DateTime.parse(json['startTime']),
-      endTime: DateTime.parse(json['endTime']),
-      totalEnrolled: json['totalEnrolled'],
-      previousAverageScore: json['previousAverageScore'],
+      startTime: DateParser.parseTimezoneIndependent(json['startTime']),
+      endTime: DateParser.parseTimezoneIndependent(json['endTime']),
+      totalEnrolled: json['totalEnrolled'] is int ? json['totalEnrolled'] : int.parse(json['totalEnrolled'].toString()),
+      previousAverageScore: json['previousAverageScore'] is int ? json['previousAverageScore'] : int.parse(json['previousAverageScore'].toString()),
       students: (json['students'] as List).map((e) => Student.fromJson(e)).toList(),
       scannedStudents: (json['scannedStudents'] as List).map((e) => Student.fromJson(e)).toList(),
     );

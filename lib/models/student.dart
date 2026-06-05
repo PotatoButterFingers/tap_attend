@@ -1,3 +1,5 @@
+import 'package:tap_attend/utils/date_parser.dart';
+
 class Student {
   final String id;
   final String name;
@@ -41,11 +43,13 @@ class Student {
 
   factory Student.fromJson(Map<String, dynamic> json) {
     return Student(
-      id: json['id'],
-      name: json['name'],
-      deviceId: json['deviceId'],
-      scanTime: json['scanTime'] != null ? DateTime.parse(json['scanTime']) : null,
-      isVerified: json['isVerified'] ?? false,
+      id: json['id']?.toString() ?? '',
+      name: json['name']?.toString() ?? '',
+      deviceId: json['deviceId']?.toString() ?? '',
+      scanTime: json['scanTime'] != null ? DateParser.parseTimezoneIndependent(json['scanTime']) : null,
+      isVerified: json['isVerified'] is bool
+          ? json['isVerified']
+          : (json['isVerified'] == 1 || json['isVerified'] == '1' || json['isVerified'] == 'true'),
     );
   }
 }

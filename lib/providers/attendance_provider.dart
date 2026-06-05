@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:nfc_manager/nfc_manager.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -15,13 +16,9 @@ class AttendanceProvider with ChangeNotifier {
   String? scanMessage;
   Student? lastScannedStudent;
   
-  Lecturer? lecturer = Lecturer(
-    name: 'Dr. Robert Smith',
-    department: 'Dept. of Computer Science',
-    email: 'robert.smith@university.edu',
-    phone: '+1 (555) 123-4567',
-    office: 'Engineering Bldg, Room 402',
-  );
+  Lecturer? lecturer;
+  String? cachedLecturerId;
+  String? cachedPassword;
 
   // Sync Queues and Custom Local Data
   List<Student> customStudents = [];
@@ -34,18 +31,24 @@ class AttendanceProvider with ChangeNotifier {
   String? activeLateSessionId; // If set, NFC scans record late attendance for this past session instead of currentSession
   String serverIp = '10.0.2.2'; // Use 10.0.2.2 for Android emulator gateway, localhost for iOS, or computer's local IP (e.g. 192.168.x.x) for physical phones
 
+  Future<void>? initializationFuture;
+
   AttendanceProvider() {
-    _loadData();
+    initializationFuture = _loadData();
   }
 
   Future<void> _loadData() async {
     final prefs = await SharedPreferences.getInstance();
+
+    serverIp = prefs.getString('serverIp') ?? '10.0.2.2';
 
     // Load lecturer profile
     final lecturerJson = prefs.getString('lecturer');
     if (lecturerJson != null) {
       lecturer = Lecturer.fromJson(jsonDecode(lecturerJson));
     }
+    cachedLecturerId = prefs.getString('cachedLecturerId');
+    cachedPassword = prefs.getString('cachedPassword');
 
     // Load past sessions
     final pastSessionsJson = prefs.getStringList('pastSessions');
@@ -69,12 +72,38 @@ class AttendanceProvider with ChangeNotifier {
       customStudents = customStudentsJson
           .map((e) => Student.fromJson(jsonDecode(e)))
           .toList();
+    } else {
+      // Seed default students on first run
+      customStudents = [
+        Student(id: '101', name: 'Benjamin Miller', deviceId: 'tag_1', isVerified: true),
+        Student(id: '102', name: 'Sophia Chen', deviceId: 'tag_2', isVerified: true),
+        Student(id: '103', name: 'Marcus Wright', deviceId: 'tag_3', isVerified: true),
+        Student(id: '201', name: 'Emma Watson', deviceId: 'tag_4', isVerified: true),
+        Student(id: '202', name: 'Liam Neeson', deviceId: 'tag_5', isVerified: true),
+        Student(id: '203', name: 'Olivia Wilde', deviceId: 'tag_6', isVerified: true),
+        Student(id: '301', name: 'Noah Centineo', deviceId: 'tag_7', isVerified: true),
+        Student(id: '302', name: 'Ava DuVernay', deviceId: 'tag_8', isVerified: true),
+        Student(id: '303', name: 'Lucas Hedges', deviceId: 'tag_9', isVerified: true),
+      ];
     }
 
     // Load custom student subject codes
     final customStudentSubjectCodesJson = prefs.getString('customStudentSubjectCodes');
     if (customStudentSubjectCodesJson != null) {
       customStudentSubjectCodes = Map<String, String>.from(jsonDecode(customStudentSubjectCodesJson));
+    } else {
+      // Seed default student class mappings on first run
+      customStudentSubjectCodes = {
+        '101': 'CS101',
+        '102': 'CS101',
+        '103': 'CS101',
+        '201': 'CS202',
+        '202': 'CS202',
+        '203': 'CS202',
+        '301': 'CS303',
+        '302': 'CS303',
+        '303': 'CS303',
+      };
     }
 
     // Load pending queues
@@ -95,6 +124,8 @@ class AttendanceProvider with ChangeNotifier {
   Future<void> _saveData() async {
     final prefs = await SharedPreferences.getInstance();
     
+    await prefs.setString('serverIp', serverIp);
+
     if (currentSession != null) {
       await prefs.setString('currentSession', jsonEncode(currentSession!.toJson()));
     } else {
@@ -103,6 +134,20 @@ class AttendanceProvider with ChangeNotifier {
 
     if (lecturer != null) {
       await prefs.setString('lecturer', jsonEncode(lecturer!.toJson()));
+    } else {
+      await prefs.remove('lecturer');
+    }
+    
+    if (cachedLecturerId != null) {
+      await prefs.setString('cachedLecturerId', cachedLecturerId!);
+    } else {
+      await prefs.remove('cachedLecturerId');
+    }
+
+    if (cachedPassword != null) {
+      await prefs.setString('cachedPassword', cachedPassword!);
+    } else {
+      await prefs.remove('cachedPassword');
     }
 
     final pastSessionsJson = pastSessions
@@ -127,6 +172,13 @@ class AttendanceProvider with ChangeNotifier {
     await prefs.setStringList('deletedStudentIds', deletedStudentIds);
   }
 
+  Future<void> updateServerIp(String ip) async {
+    serverIp = ip;
+    await _saveData();
+    notifyListeners();
+    await checkServerConnection();
+  }
+
   Future<void> updateLecturer(Lecturer updated) async {
     lecturer = updated;
     await _saveData();
@@ -141,41 +193,10 @@ class AttendanceProvider with ChangeNotifier {
     loadSessionByCode('CS101');
   }
 
-  // Gets the initial hardcoded class roster
-  List<Student> getDefaultStudents(String subjectCode) {
-    if (subjectCode == 'CS101') {
-      return [
-        Student(id: '101', name: 'Benjamin Miller', deviceId: 'tag_1', isVerified: true),
-        Student(id: '102', name: 'Sophia Chen', deviceId: 'tag_2', isVerified: true),
-        Student(id: '103', name: 'Marcus Wright', deviceId: 'tag_3', isVerified: true),
-      ];
-    } else if (subjectCode == 'CS202') {
-      return [
-        Student(id: '201', name: 'Emma Watson', deviceId: 'tag_4', isVerified: true),
-        Student(id: '202', name: 'Liam Neeson', deviceId: 'tag_5', isVerified: true),
-        Student(id: '203', name: 'Olivia Wilde', deviceId: 'tag_6', isVerified: true),
-      ];
-    } else if (subjectCode == 'CS303') {
-      return [
-        Student(id: '301', name: 'Noah Centineo', deviceId: 'tag_7', isVerified: true),
-        Student(id: '302', name: 'Ava DuVernay', deviceId: 'tag_8', isVerified: true),
-        Student(id: '303', name: 'Lucas Hedges', deviceId: 'tag_9', isVerified: true),
-      ];
-    }
-    return [];
-  }
-
   // Get master list of all unique active students in the directory
   List<Student> get allStudentsInDirectory {
-    final list = [
-      ...getDefaultStudents('CS101'),
-      ...getDefaultStudents('CS202'),
-      ...getDefaultStudents('CS303'),
-      ...customStudents,
-    ];
-    
     // Filter out deleted students
-    final filteredList = list.where((s) => !deletedStudentIds.contains(s.id)).toList();
+    final filteredList = customStudents.where((s) => !deletedStudentIds.contains(s.id)).toList();
     
     // De-duplicate by ID
     final Map<String, Student> unique = {};
@@ -186,15 +207,10 @@ class AttendanceProvider with ChangeNotifier {
   }
 
   void loadSessionByCode(String subjectCode) {
-    // 1. Load default students
-    final defaultList = getDefaultStudents(subjectCode);
-    
-    // 2. Load custom students enrolled in this class
-    final customList = customStudents.where((s) => customStudentSubjectCodes[s.id] == subjectCode).toList();
-
-    // Combine and apply deleted filters
-    final combined = [...defaultList, ...customList];
-    final activeStudents = combined.where((s) => !deletedStudentIds.contains(s.id)).toList();
+    // Load custom students enrolled in this class from local cache
+    final activeStudents = customStudents
+        .where((s) => customStudentSubjectCodes[s.id] == subjectCode && !deletedStudentIds.contains(s.id))
+        .toList();
 
     if (subjectCode == 'CS202') {
       currentSession = ClassSession(
@@ -237,6 +253,12 @@ class AttendanceProvider with ChangeNotifier {
         scannedStudents: [],
       );
     }
+    _saveData();
+    notifyListeners();
+  }
+
+  void loadSession(ClassSession session) {
+    currentSession = session;
     _saveData();
     notifyListeners();
   }
@@ -373,11 +395,133 @@ class AttendanceProvider with ChangeNotifier {
       isServerConnectionActive = false;
     }
     notifyListeners();
-    if (isServerConnectionActive && (pendingRegistrations.isNotEmpty || pendingDeletions.isNotEmpty || unsyncedSessionIds.isNotEmpty)) {
-      // Auto-trigger sync when connectivity is verified and there is data in queue
-      syncAllPendingData();
+    if (isServerConnectionActive) {
+      await syncAllPendingData();
+      await fetchStudentsFromServer();
+      await fetchSessionsFromServer();
     }
     return isServerConnectionActive;
+  }
+
+  Future<void> fetchStudentsFromServer() async {
+    try {
+      final response = await http.get(Uri.parse('http://$serverIp/tap_attend/api/get_students.php')).timeout(const Duration(seconds: 3));
+      if (response.statusCode == 200) {
+        isServerConnectionActive = true;
+        final List<dynamic> data = jsonDecode(response.body);
+        final List<Student> fetchedStudents = [];
+        final Map<String, String> fetchedSubjectCodes = {};
+
+        for (var item in data) {
+          final student = Student(
+            id: item['id'],
+            name: item['name'],
+            deviceId: item['deviceId'],
+            isVerified: item['isVerified'] ?? true,
+          );
+          fetchedStudents.add(student);
+          fetchedSubjectCodes[student.id] = item['subjectCode'];
+        }
+
+        customStudents = fetchedStudents;
+        customStudentSubjectCodes = fetchedSubjectCodes;
+        await _saveData();
+        notifyListeners();
+      } else {
+        isServerConnectionActive = false;
+        notifyListeners();
+      }
+    } catch (_) {
+      isServerConnectionActive = false;
+      notifyListeners();
+    }
+  }
+
+  Future<void> fetchSessionsFromServer() async {
+    try {
+      debugPrint("[DateDebug] fetchSessionsFromServer started. ServerIp: $serverIp");
+      final response = await http.get(Uri.parse('http://$serverIp/tap_attend/api/get_sessions.php')).timeout(const Duration(seconds: 3));
+      debugPrint("[DateDebug] fetchSessionsFromServer response: ${response.statusCode}, body: ${response.body}");
+      if (response.statusCode == 200) {
+        isServerConnectionActive = true;
+        final List<dynamic> data = jsonDecode(response.body);
+        final List<ClassSession> fetchedSessions = data
+            .map((e) => ClassSession.fromJson(e))
+            .toList();
+
+        pastSessions = fetchedSessions;
+        await _saveData();
+        notifyListeners();
+      } else {
+        isServerConnectionActive = false;
+        notifyListeners();
+      }
+    } catch (e) {
+      debugPrint("[DateDebug] fetchSessionsFromServer error: $e");
+      isServerConnectionActive = false;
+      notifyListeners();
+    }
+  }
+
+  // Checks the XAMPP server for a session matching the subjectCode and date.
+  // If found, merges/saves it to local pastSessions and returns it.
+  Future<ClassSession?> checkAndFetchSessionFromServer(String subjectCode, DateTime date) async {
+    try {
+      debugPrint("[DateDebug] checkAndFetchSessionFromServer started. Code: $subjectCode, Date: $date, ServerIp: $serverIp");
+      final response = await http.get(
+        Uri.parse('http://$serverIp/tap_attend/api/get_sessions.php'),
+      ).timeout(const Duration(seconds: 3));
+      
+      debugPrint("[DateDebug] checkAndFetchSessionFromServer response: ${response.statusCode}, body: ${response.body}");
+      if (response.statusCode == 200) {
+        isServerConnectionActive = true;
+        final List<dynamic> data = jsonDecode(response.body);
+        final List<ClassSession> fetchedSessions = data
+            .map((e) => ClassSession.fromJson(e))
+            .toList();
+        
+        for (var s in fetchedSessions) {
+          debugPrint("[DateDebug] Fetched: id=${s.id}, code=${s.subjectCode}, startTime=${s.startTime} (Y:${s.startTime.year} M:${s.startTime.month} D:${s.startTime.day})");
+        }
+        
+        final matchIdx = fetchedSessions.indexWhere(
+          (s) {
+            final matches = s.subjectCode == subjectCode &&
+                 s.startTime.year == date.year &&
+                 s.startTime.month == date.month &&
+                 s.startTime.day == date.day;
+            debugPrint("[DateDebug] Compare with ${s.id}: code match=${s.subjectCode == subjectCode}, year=${s.startTime.year == date.year}, month=${s.startTime.month == date.month}, day=${s.startTime.day == date.day} -> matches=$matches");
+            return matches;
+          }
+        );
+        
+        debugPrint("[DateDebug] Match index: $matchIdx");
+        if (matchIdx != -1) {
+          final match = fetchedSessions[matchIdx];
+          
+          final existingIdx = pastSessions.indexWhere((s) => s.id == match.id);
+          if (existingIdx != -1) {
+            pastSessions[existingIdx] = match;
+          } else {
+            pastSessions.add(match);
+          }
+          
+          await _saveData();
+          notifyListeners();
+          return match;
+        } else {
+          notifyListeners();
+        }
+      } else {
+        isServerConnectionActive = false;
+        notifyListeners();
+      }
+    } catch (e) {
+      debugPrint("[DateDebug] checkAndFetchSessionFromServer error: $e");
+      isServerConnectionActive = false;
+      notifyListeners();
+    }
+    return null;
   }
 
   Future<bool> _trySyncStudentToXampp(String id, String name, String cardUid, String subjectCode) async {
@@ -605,10 +749,9 @@ class AttendanceProvider with ChangeNotifier {
       return pastSessions[existingIdx];
     }
     
-    final defaultList = getDefaultStudents(subjectCode);
-    final customList = customStudents.where((s) => customStudentSubjectCodes[s.id] == subjectCode).toList();
-    final combined = [...defaultList, ...customList];
-    final roster = combined.where((s) => !deletedStudentIds.contains(s.id)).toList();
+    final roster = customStudents
+        .where((s) => customStudentSubjectCodes[s.id] == subjectCode && !deletedStudentIds.contains(s.id))
+        .toList();
     
     DateTime startTime;
     DateTime endTime;
@@ -717,42 +860,188 @@ class AttendanceProvider with ChangeNotifier {
     notifyListeners();
   }
 
-  // Deletes a single past session from history
+  // Deletes a single past session from history (local app history only)
   Future<void> deletePastSession(String sessionId) async {
     pastSessions.removeWhere((s) => s.id == sessionId);
-    await _trySyncDeleteSessionToXampp(sessionId);
     await _saveData();
     notifyListeners();
   }
 
-  // Clears all past sessions from history
+  // Clears all past sessions from history (local app history only)
   Future<void> clearAllPastSessions() async {
     pastSessions.clear();
-    await _trySyncClearAllSessionsToXampp();
     await _saveData();
     notifyListeners();
   }
 
-  Future<bool> _trySyncDeleteSessionToXampp(String sessionId) async {
-    try {
-      final response = await http.post(
-        Uri.parse('http://$serverIp/tap_attend/api/delete_session.php'),
-        body: {'id': sessionId},
-      ).timeout(const Duration(seconds: 3));
-      return response.statusCode == 200;
-    } catch (_) {
-      return false;
+  // Removes a student's attendance from a session and updates the XAMPP database
+  Future<void> removeStudentAttendance(String sessionId, String studentId) async {
+    final index = pastSessions.indexWhere((s) => s.id == sessionId);
+    if (index != -1) {
+      final session = pastSessions[index];
+      final updatedScanned = session.scannedStudents.where((s) => s.id != studentId).toList();
+      final updatedSession = session.copyWith(scannedStudents: updatedScanned);
+      
+      pastSessions[index] = updatedSession;
+      
+      // Sync change to XAMPP database immediately if online, else queue it
+      bool success = await _trySyncSessionToXampp(updatedSession);
+      if (!success) {
+        if (!unsyncedSessionIds.contains(sessionId)) {
+          unsyncedSessionIds.add(sessionId);
+        }
+      } else {
+        unsyncedSessionIds.remove(sessionId);
+      }
+      
+      await _saveData();
+      notifyListeners();
     }
   }
 
-  Future<bool> _trySyncClearAllSessionsToXampp() async {
-    try {
-      final response = await http.post(
-        Uri.parse('http://$serverIp/tap_attend/api/clear_all_sessions.php'),
-      ).timeout(const Duration(seconds: 3));
-      return response.statusCode == 200;
-    } catch (_) {
-      return false;
+  // Clears all student attendance from a session (makes everyone absent) and updates XAMPP
+  Future<void> clearAllSessionAttendance(String sessionId) async {
+    final index = pastSessions.indexWhere((s) => s.id == sessionId);
+    if (index != -1) {
+      final session = pastSessions[index];
+      final updatedSession = session.copyWith(scannedStudents: []);
+      
+      pastSessions[index] = updatedSession;
+      
+      // Sync change to XAMPP database immediately if online, else queue it
+      bool success = await _trySyncSessionToXampp(updatedSession);
+      if (!success) {
+        if (!unsyncedSessionIds.contains(sessionId)) {
+          unsyncedSessionIds.add(sessionId);
+        }
+      } else {
+        unsyncedSessionIds.remove(sessionId);
+      }
+      
+      await _saveData();
+      notifyListeners();
     }
+  }
+
+  // Auto-scans local subnet IPs (e.g. 192.168.1.x or 10.x.x.x) to locate the XAMPP backend
+  Future<String?> autoDiscoverServer() async {
+    try {
+      final interfaces = await NetworkInterface.list(
+        type: InternetAddressType.IPv4,
+        includeLinkLocal: false,
+        includeLoopback: false,
+      );
+
+      if (interfaces.isEmpty) return null;
+
+      String? localIp;
+      for (var interface in interfaces) {
+        for (var addr in interface.addresses) {
+          // Identify common private network / local subnets
+          if (addr.address.startsWith('192.168.') ||
+              addr.address.startsWith('10.') ||
+              addr.address.startsWith('172.')) {
+            localIp = addr.address;
+            break;
+          }
+        }
+        if (localIp != null) break;
+      }
+
+      if (localIp == null) return null;
+
+      final parts = localIp.split('.');
+      if (parts.length != 4) return null;
+      final subnetPrefix = '${parts[0]}.${parts[1]}.${parts[2]}';
+
+      // Perform a fast concurrent subnet scan
+      final List<Future<String?>> scanFutures = [];
+      for (int i = 1; i <= 254; i++) {
+        final ipToTest = '$subnetPrefix.$i';
+        if (ipToTest == localIp) continue;
+
+        scanFutures.add(
+          http.get(Uri.parse('http://$ipToTest/tap_attend/api/db_connect.php'))
+              .timeout(const Duration(milliseconds: 1000))
+              .then((response) {
+                if (response.statusCode == 200) {
+                  return ipToTest;
+                }
+                return null;
+              })
+              .catchError((_) => null)
+        );
+      }
+
+      final results = await Future.wait(scanFutures);
+      for (var result in results) {
+        if (result != null) {
+          await updateServerIp(result);
+          return result;
+        }
+      }
+    } catch (_) {}
+    return null;
+  }
+
+  Future<bool> loginLecturer(String lecturerId, String password) async {
+    final idClean = lecturerId.trim().toLowerCase();
+    final pwdClean = password.trim();
+
+    if (idClean.isEmpty || pwdClean.isEmpty) return false;
+
+    // 1. Try online login first if server connection is active
+    if (isServerConnectionActive) {
+      try {
+        final response = await http.post(
+          Uri.parse('http://$serverIp/tap_attend/api/login_lecturer.php'),
+          body: {'lecturer_id': idClean, 'password': pwdClean},
+        ).timeout(const Duration(seconds: 4));
+
+        if (response.statusCode == 200) {
+          final data = jsonDecode(response.body);
+          if (data['success'] == true) {
+            lecturer = Lecturer.fromJson(data['lecturer']);
+            cachedLecturerId = idClean;
+            cachedPassword = pwdClean;
+            await _saveData();
+            notifyListeners();
+            return true;
+          }
+        }
+      } catch (_) {
+        // Fallback to offline check if network fails
+      }
+    }
+
+    // 2. Offline Mode verification against local cache
+    if (cachedLecturerId != null && cachedPassword != null) {
+      if (idClean == cachedLecturerId && pwdClean == cachedPassword) {
+        if (lecturer == null) {
+          final prefs = await SharedPreferences.getInstance();
+          final lecturerJson = prefs.getString('lecturer');
+          if (lecturerJson != null) {
+            lecturer = Lecturer.fromJson(jsonDecode(lecturerJson));
+          }
+        }
+        notifyListeners();
+        return true;
+      }
+    }
+
+    return false;
+  }
+
+  Future<void> signOutLecturer() async {
+    lecturer = null;
+    cachedLecturerId = null;
+    cachedPassword = null;
+    
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.remove('lecturer');
+    await prefs.remove('cachedLecturerId');
+    await prefs.remove('cachedPassword');
+    
+    notifyListeners();
   }
 }

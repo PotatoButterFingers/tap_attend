@@ -5,6 +5,8 @@ import 'package:tap_attend/providers/attendance_provider.dart';
 import 'package:tap_attend/screens/session_overview_screen.dart';
 import 'package:tap_attend/screens/card_registration_screen.dart';
 import 'package:tap_attend/screens/late_attendance_screen.dart';
+import 'package:tap_attend/screens/session_detail_screen.dart';
+import 'package:tap_attend/models/class_session.dart';
 
 class DashboardScreen extends StatefulWidget {
   const DashboardScreen({super.key});
@@ -24,6 +26,13 @@ class _DashboardScreenState extends State<DashboardScreen> {
     final now = DateTime.now();
     _mockToday = DateTime(now.year, now.month, now.day);
     _selectedDate = _mockToday;
+
+    // Fetch sessions from server to sync attendance tags
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) {
+        context.read<AttendanceProvider>().fetchSessionsFromServer();
+      }
+    });
 
     // Tick the clock every minute to keep the date & time dynamically in sync
     _clockTimer = Timer.periodic(const Duration(seconds: 30), (timer) {
@@ -81,20 +90,68 @@ class _DashboardScreenState extends State<DashboardScreen> {
     return DateTime(date.year, date.month, date.day, 16, 45);
   }
 
-  void _handleClassTap(BuildContext context, String subjectCode, String subjectName) {
+  Future<void> _handleClassTap(BuildContext context, String subjectCode, String subjectName) async {
     final provider = context.read<AttendanceProvider>();
     final now = DateTime.now();
     
     final selectedDateOnly = DateTime(_selectedDate.year, _selectedDate.month, _selectedDate.day);
     final todayOnly = DateTime(now.year, now.month, now.day);
     
+    // Check if the session is already in local pastSessions
+    final localIdx = provider.pastSessions.indexWhere((s) => 
+      s.subjectCode == subjectCode &&
+      s.startTime.year == _selectedDate.year &&
+      s.startTime.month == _selectedDate.month &&
+      s.startTime.day == _selectedDate.day
+    );
+
+    ClassSession? session;
+    if (localIdx != -1) {
+      session = provider.pastSessions[localIdx];
+    } else {
+      // If we are looking at a past day, OR today (even if upcoming/active):
+      // Always query the server first to check if a session already exists!
+      // This prevents overriding existing database records with blank sessions on timezone mismatch/clock out of sync.
+      if (selectedDateOnly.isBefore(todayOnly) || selectedDateOnly.isAtSameMomentAs(todayOnly)) {
+        showDialog(
+          context: context,
+          barrierDismissible: false,
+          builder: (context) => const AlertDialog(
+            content: Row(
+              children: [
+                CircularProgressIndicator(),
+                SizedBox(width: 24),
+                Expanded(child: Text('Loading attendance record...')),
+              ],
+            ),
+          ),
+        );
+        
+        session = await provider.checkAndFetchSessionFromServer(subjectCode, _selectedDate);
+        
+        if (context.mounted) {
+          Navigator.pop(context); // Dismiss loading dialog
+          if (session == null && !provider.isServerConnectionActive) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text('Failed to connect to XAMPP server. Showing offline/blank session.'),
+                backgroundColor: Colors.red,
+              ),
+            );
+          }
+        }
+      }
+    }
+
+    if (!context.mounted) return;
+
     if (selectedDateOnly.isBefore(todayOnly)) {
       // Past day: Open retrospective late recording
-      final session = provider.getOrCreatePastSession(subjectCode, _selectedDate);
+      final finalSession = session ?? provider.getOrCreatePastSession(subjectCode, _selectedDate);
       Navigator.push(
         context,
         MaterialPageRoute(
-          builder: (_) => LateAttendanceScreen(session: session),
+          builder: (_) => LateAttendanceScreen(session: finalSession),
         ),
       );
     } else if (selectedDateOnly.isAfter(todayOnly)) {
@@ -109,20 +166,103 @@ class _DashboardScreenState extends State<DashboardScreen> {
       // Today: evaluate time slot
       final classEnd = _getClassEndTime(subjectCode, now);
       if (now.isAfter(classEnd)) {
-        // Today past: Open late attendance
-        final session = provider.getOrCreatePastSession(subjectCode, now);
+        // Today past/ended: Open late attendance
+        final finalSession = session ?? provider.getOrCreatePastSession(subjectCode, now);
         Navigator.push(
           context,
           MaterialPageRoute(
-            builder: (_) => LateAttendanceScreen(session: session),
+            builder: (_) => LateAttendanceScreen(session: finalSession),
           ),
         );
       } else {
-        // Today active or upcoming: Open live session scanner
-        provider.loadSessionByCode(subjectCode);
+        // Today active or upcoming:
+        if (session != null) {
+          // If session already exists on the server, load it!
+          provider.loadSession(session);
+        } else {
+          // Otherwise, initialize a new session
+          provider.loadSessionByCode(subjectCode);
+        }
         Navigator.push(
           context,
           MaterialPageRoute(builder: (_) => const SessionOverviewScreen()),
+        );
+      }
+    }
+  }
+
+  Future<void> _viewAttendanceDetails(
+    BuildContext context,
+    AttendanceProvider provider,
+    String subjectCode,
+    DateTime date,
+    String subjectName,
+  ) async {
+    // 1. Check if we already have it locally
+    final localIdx = provider.pastSessions.indexWhere(
+      (s) => s.subjectCode == subjectCode &&
+             s.startTime.year == date.year &&
+             s.startTime.month == date.month &&
+             s.startTime.day == date.day,
+    );
+
+    if (localIdx != -1) {
+      // Found locally, navigate immediately
+      Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (_) => SessionDetailScreen(session: provider.pastSessions[localIdx]),
+        ),
+      );
+      return;
+    }
+
+    // 2. If not found locally, show loading dialog and check XAMPP server
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => const AlertDialog(
+        content: Row(
+          children: [
+            CircularProgressIndicator(),
+            SizedBox(width: 24),
+            Expanded(child: Text('Checking XAMPP server for attendance...')),
+          ],
+        ),
+      ),
+    );
+
+    // Call check and fetch
+    final session = await provider.checkAndFetchSessionFromServer(subjectCode, date);
+
+    if (context.mounted) {
+      Navigator.pop(context); // Dismiss loading dialog
+
+      if (session != null) {
+        // Found on server, navigate to details
+        Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (_) => SessionDetailScreen(session: session),
+          ),
+        );
+      } else {
+        // Not found anywhere (differentiate connection failure vs actual missing session record)
+        final message = provider.isServerConnectionActive
+            ? 'Could not find any attendance session for $subjectName ($subjectCode) on this date on the XAMPP server.'
+            : 'Could not connect to the XAMPP server. Please check your network connection and Server IP.';
+        showDialog(
+          context: context,
+          builder: (context) => AlertDialog(
+            title: Text(provider.isServerConnectionActive ? 'No Record Found' : 'Connection Error'),
+            content: Text(message),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(context),
+                child: const Text('OK'),
+              ),
+            ],
+          ),
         );
       }
     }
@@ -195,6 +335,44 @@ class _DashboardScreenState extends State<DashboardScreen> {
         tagColor = Colors.orange;
       }
     }
+
+    final isPastOrEnded = selectedDateOnly.isBefore(todayOnly) ||
+        (selectedDateOnly.isAtSameMomentAs(todayOnly) && now.isAfter(_getClassEndTime(subjectCode, now)));
+
+    Widget? actionRow;
+    if (isPastOrEnded) {
+      actionRow = Row(
+        mainAxisAlignment: MainAxisAlignment.end,
+        children: [
+          TextButton.icon(
+            onPressed: () => _handleClassTap(context, subjectCode, subject),
+            icon: const Icon(Icons.edit_calendar, size: 16),
+            label: const Text('Late Attendance', style: TextStyle(fontSize: 12)),
+            style: TextButton.styleFrom(
+              foregroundColor: Theme.of(context).primaryColor,
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+              minimumSize: Size.zero,
+              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+            ),
+          ),
+          const SizedBox(width: 12),
+          ElevatedButton.icon(
+            onPressed: () => _viewAttendanceDetails(context, provider, subjectCode, _selectedDate, subject),
+            icon: const Icon(Icons.analytics_outlined, size: 16),
+            label: const Text('Attendance Details', style: TextStyle(fontSize: 12)),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Theme.of(context).primaryColor.withValues(alpha: 0.1),
+              foregroundColor: Theme.of(context).primaryColor,
+              elevation: 0,
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+              minimumSize: Size.zero,
+              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+            ),
+          ),
+        ],
+      );
+    }
     
     return _buildScheduleCard(
       context,
@@ -204,6 +382,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
       tag: tag,
       tagColor: tagColor,
       onTap: () => _handleClassTap(context, subjectCode, subject),
+      actionRow: actionRow,
     );
   }
 
@@ -219,91 +398,98 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
     return Scaffold(
       body: SafeArea(
-        child: SingleChildScrollView(
-          padding: const EdgeInsets.all(24),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              // Header Profile
-              Row(
-                children: [
-                  const CircleAvatar(
-                    backgroundColor: Colors.blueAccent,
-                    child: Icon(Icons.person, color: Colors.white),
-                  ),
-                  const SizedBox(width: 12),
-                  const Text('Academic Portal', style: TextStyle(fontWeight: FontWeight.bold, color: Colors.blue)),
-                  const Spacer(),
-                  IconButton(
-                    icon: const Icon(Icons.nfc, color: Colors.blue),
-                    tooltip: 'Card Registration',
-                    onPressed: () {
-                      Navigator.push(
-                        context,
-                        MaterialPageRoute(builder: (_) => const CardRegistrationScreen()),
-                      );
-                    },
-                  ),
-                  const SizedBox(width: 8),
-                  IconButton(
-                    icon: const Icon(Icons.calendar_month),
-                    tooltip: 'Select Date',
-                    onPressed: () async {
-                      final DateTime? picked = await showDatePicker(
-                        context: context,
-                        initialDate: _selectedDate,
-                        firstDate: DateTime(2022),
-                        lastDate: DateTime(2028),
-                      );
-                      if (picked != null && picked != _selectedDate) {
-                        setState(() {
-                          _selectedDate = picked;
-                        });
-                      }
-                    },
-                  ),
-                ],
-              ),
-              const SizedBox(height: 24),
-              
-              // Greeting
-              RichText(
-                text: TextSpan(
-                  style: Theme.of(context).textTheme.displayLarge?.copyWith(fontSize: 28),
+        child: RefreshIndicator(
+          onRefresh: () => context.read<AttendanceProvider>().fetchSessionsFromServer(),
+          child: SingleChildScrollView(
+            physics: const AlwaysScrollableScrollPhysics(),
+            padding: const EdgeInsets.all(24),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                // Header Profile
+                Row(
                   children: [
-                    const TextSpan(text: 'Good Morning, '),
-                    TextSpan(text: lecturerName, style: TextStyle(color: Theme.of(context).primaryColor)),
+                    const CircleAvatar(
+                      backgroundColor: Colors.blueAccent,
+                      child: Icon(Icons.person, color: Colors.white),
+                    ),
+                    const SizedBox(width: 12),
+                    const Text('Academic Portal', style: TextStyle(fontWeight: FontWeight.bold, color: Colors.blue)),
+                    const Spacer(),
+                    IconButton(
+                      icon: const Icon(Icons.nfc, color: Colors.blue),
+                      tooltip: 'Card Registration',
+                      onPressed: () {
+                        Navigator.push(
+                          context,
+                          MaterialPageRoute(builder: (_) => const CardRegistrationScreen()),
+                        );
+                      },
+                    ),
+                    const SizedBox(width: 8),
+                    IconButton(
+                      icon: const Icon(Icons.calendar_month),
+                      tooltip: 'Select Date',
+                      onPressed: () async {
+                        final DateTime? picked = await showDatePicker(
+                          context: context,
+                          initialDate: _selectedDate,
+                          firstDate: DateTime(2022),
+                          lastDate: DateTime(2028),
+                        );
+                        if (picked != null && picked != _selectedDate) {
+                          setState(() {
+                            _selectedDate = picked;
+                          });
+                          if (context.mounted) {
+                            context.read<AttendanceProvider>().fetchSessionsFromServer();
+                          }
+                        }
+                      },
+                    ),
                   ],
                 ),
-              ),
-              const SizedBox(height: 8),
-              
-              // Dynamic Date and Time Display
-              Row(
-                children: [
-                  Text(
-                    isShowingToday 
-                        ? '${_formatDisplayDate(_selectedDate)} • ${_formatTime(DateTime.now())}' 
-                        : _formatDisplayDate(_selectedDate), 
-                    style: Theme.of(context).textTheme.bodyMedium,
+                const SizedBox(height: 24),
+                
+                // Greeting
+                RichText(
+                  text: TextSpan(
+                    style: Theme.of(context).textTheme.displayLarge?.copyWith(fontSize: 28),
+                    children: [
+                      const TextSpan(text: 'Good Morning, '),
+                      TextSpan(text: lecturerName, style: TextStyle(color: Theme.of(context).primaryColor)),
+                    ],
                   ),
-                  if (!isShowingToday) ...[
-                    const SizedBox(width: 8),
-                    GestureDetector(
-                      onTap: () {
-                        setState(() {
-                          _selectedDate = _mockToday;
-                        });
-                      },
-                      child: Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                        decoration: BoxDecoration(
-                          color: Theme.of(context).primaryColor.withValues(alpha: 0.1),
-                          borderRadius: BorderRadius.circular(8),
-                        ),
-                        child: Text(
-                          'Reset to Today',
-                          style: TextStyle(
+                ),
+                const SizedBox(height: 8),
+                
+                // Dynamic Date and Time Display
+                Row(
+                  children: [
+                    Text(
+                      isShowingToday 
+                          ? '${_formatDisplayDate(_selectedDate)} • ${_formatTime(DateTime.now())}' 
+                          : _formatDisplayDate(_selectedDate), 
+                      style: Theme.of(context).textTheme.bodyMedium,
+                    ),
+                    if (!isShowingToday) ...[
+                      const SizedBox(width: 8),
+                      GestureDetector(
+                        onTap: () {
+                          setState(() {
+                            _selectedDate = _mockToday;
+                          });
+                          context.read<AttendanceProvider>().fetchSessionsFromServer();
+                        },
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                          decoration: BoxDecoration(
+                            color: Theme.of(context).primaryColor.withValues(alpha: 0.1),
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                          child: Text(
+                            'Reset to Today',
+                            style: TextStyle(
                             color: Theme.of(context).primaryColor, 
                             fontSize: 10, 
                             fontWeight: FontWeight.bold,
@@ -451,8 +637,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
           ),
         ),
       ),
-    );
-  }
+    ),
+  );
+}
 
   Widget _buildScheduleCard(
     BuildContext context, {
@@ -462,6 +649,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
     required String tag,
     Color tagColor = Colors.blue,
     VoidCallback? onTap,
+    Widget? actionRow,
   }) {
     return GestureDetector(
       onTap: onTap,
@@ -513,6 +701,10 @@ class _DashboardScreenState extends State<DashboardScreen> {
                 Text(location, style: Theme.of(context).textTheme.bodyMedium?.copyWith(fontSize: 12)),
               ],
             ),
+            if (actionRow != null) ...[
+              const Divider(height: 24),
+              actionRow,
+            ],
           ],
         ),
       ),

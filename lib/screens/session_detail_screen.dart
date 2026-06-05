@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
+import 'package:tap_attend/providers/attendance_provider.dart';
 import 'package:tap_attend/models/class_session.dart';
 import 'package:tap_attend/models/student.dart';
 import 'package:tap_attend/utils/export_utils.dart';
@@ -16,9 +18,95 @@ class _SessionDetailScreenState extends State<SessionDetailScreen> {
   String _searchQuery = '';
   String _filter = 'All'; // 'All', 'Present', 'Absent'
 
+  void _confirmClearAll(BuildContext context, AttendanceProvider provider, String sessionId) {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Row(
+          children: [
+            Icon(Icons.warning_amber_rounded, color: Colors.red),
+            SizedBox(width: 8),
+            Text('Clear All Attendance?'),
+          ],
+        ),
+        content: const Text(
+          'Are you sure you want to clear all attendance records for this session?\n\nThis will mark all students as absent in the database.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cancel'),
+          ),
+          ElevatedButton(
+            onPressed: () {
+              provider.clearAllSessionAttendance(sessionId);
+              Navigator.pop(context);
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(
+                  content: Text('All student attendance cleared for this session'),
+                  backgroundColor: Colors.redAccent,
+                ),
+              );
+            },
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.red,
+              foregroundColor: Colors.white,
+            ),
+            child: const Text('Clear All'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _confirmRemoveIndividual(BuildContext context, AttendanceProvider provider, String sessionId, Student student) {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Row(
+          children: [
+            Icon(Icons.person_remove_outlined, color: Colors.orange),
+            SizedBox(width: 8),
+            Text('Remove Attendance?'),
+          ],
+        ),
+        content: Text(
+          'Are you sure you want to remove attendance for ${student.name}?\n\nThis will change their status to absent in the database.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cancel'),
+          ),
+          ElevatedButton(
+            onPressed: () {
+              provider.removeStudentAttendance(sessionId, student.id);
+              Navigator.pop(context);
+              ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(
+                  content: Text('Removed attendance for ${student.name}'),
+                  backgroundColor: Colors.orange,
+                ),
+              );
+            },
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.orange,
+              foregroundColor: Colors.white,
+            ),
+            child: const Text('Remove'),
+          ),
+        ],
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
-    final session = widget.session;
+    final provider = context.watch<AttendanceProvider>();
+    final session = provider.pastSessions.firstWhere(
+      (s) => s.id == widget.session.id,
+      orElse: () => widget.session,
+    );
     final isDark = Theme.of(context).brightness == Brightness.dark;
 
     final presentStudentIds = session.scannedStudents.map((s) => s.id).toSet();
@@ -102,6 +190,13 @@ class _SessionDetailScreenState extends State<SessionDetailScreen> {
                 );
               }
             },
+          ),
+          IconButton(
+            icon: const Icon(Icons.delete_sweep, color: Colors.redAccent),
+            tooltip: 'Clear All Attendance',
+            onPressed: presentCount == 0
+                ? null
+                : () => _confirmClearAll(context, provider, session.id),
           ),
           const SizedBox(width: 8),
         ],
@@ -271,20 +366,35 @@ class _SessionDetailScreenState extends State<SessionDetailScreen> {
                                 ],
                               ),
                             ),
-                            Container(
-                              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                              decoration: BoxDecoration(
-                                color: trailingColor.withValues(alpha: 0.1),
-                                borderRadius: BorderRadius.circular(12),
-                              ),
-                              child: Text(
-                                trailingText,
-                                style: TextStyle(
-                                  color: trailingColor,
-                                  fontWeight: FontWeight.bold,
-                                  fontSize: 12,
+                            Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Container(
+                                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                                  decoration: BoxDecoration(
+                                    color: trailingColor.withValues(alpha: 0.1),
+                                    borderRadius: BorderRadius.circular(12),
+                                  ),
+                                  child: Text(
+                                    trailingText,
+                                    style: TextStyle(
+                                      color: trailingColor,
+                                      fontWeight: FontWeight.bold,
+                                      fontSize: 12,
+                                    ),
+                                  ),
                                 ),
-                              ),
+                                if (isPresent) ...[
+                                  const SizedBox(width: 8),
+                                  IconButton(
+                                    icon: const Icon(Icons.remove_circle_outline, color: Colors.red, size: 20),
+                                    padding: EdgeInsets.zero,
+                                    constraints: const BoxConstraints(),
+                                    tooltip: 'Remove attendance',
+                                    onPressed: () => _confirmRemoveIndividual(context, provider, session.id, student),
+                                  ),
+                                ],
+                              ],
                             ),
                           ],
                         );
