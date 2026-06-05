@@ -112,23 +112,26 @@ void main() {
       expect(session.previousAverageScore, equals(85));
     });
 
-    test('Lecturer.fromJson and toJson should serialize id properly', () {
+    test('Lecturer.fromJson and toJson should serialize id and cardUid properly', () {
       final json = {
         'lecturer_id': 'sharvin',
         'name': 'Mr. Sharvin Ganeson',
         'department': 'Dept. of Computer Science',
         'email': 'sharvin.ganeson@university.edu',
         'phone': '+1 (555) 123-4567',
-        'office': 'Engineering Bldg, Room 402'
+        'office': 'Engineering Bldg, Room 402',
+        'card_uid': 'lecturer_card_1'
       };
 
       final lecturer = Lecturer.fromJson(json);
       expect(lecturer.id, equals('sharvin'));
       expect(lecturer.name, equals('Mr. Sharvin Ganeson'));
+      expect(lecturer.cardUid, equals('lecturer_card_1'));
 
       final serialized = lecturer.toJson();
       expect(serialized['id'], equals('sharvin'));
       expect(serialized['name'], equals('Mr. Sharvin Ganeson'));
+      expect(serialized['card_uid'], equals('lecturer_card_1'));
     });
   });
 

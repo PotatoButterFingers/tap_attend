@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import 'package:tap_attend/providers/attendance_provider.dart';
 import 'package:tap_attend/screens/main_screen.dart';
+import 'package:tap_attend/screens/nfc_login_screen.dart';
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
@@ -189,25 +190,7 @@ class _LoginScreenState extends State<LoginScreen> {
                             ),
                           ),
                         ),
-                        
-                        const SizedBox(height: 4),
-                        Align(
-                          alignment: Alignment.centerRight,
-                          child: TextButton(
-                            onPressed: () {},
-                            style: TextButton.styleFrom(
-                              padding: EdgeInsets.zero,
-                              minimumSize: const Size(0, 30),
-                              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                            ),
-                            child: Text(
-                              'Forgot Password?',
-                              style: TextStyle(color: Theme.of(context).primaryColor, fontSize: 13),
-                            ),
-                          ),
-                        ),
-                        
-                        const SizedBox(height: 8),
+                        const SizedBox(height: 16),
                         ElevatedButton(
                           onPressed: _isLoading ? null : _handleSignIn,
                           child: _isLoading
@@ -233,7 +216,12 @@ class _LoginScreenState extends State<LoginScreen> {
                         const SizedBox(height: 16),
                         
                         OutlinedButton.icon(
-                          onPressed: () {},
+                          onPressed: () {
+                            Navigator.push(
+                              context,
+                              MaterialPageRoute(builder: (_) => const NfcLoginScreen()),
+                            );
+                          },
                           icon: const Icon(Icons.nfc),
                           label: const Text('University NFC Card', style: TextStyle(fontWeight: FontWeight.w600)),
                           style: OutlinedButton.styleFrom(

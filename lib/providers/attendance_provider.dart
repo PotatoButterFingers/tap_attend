@@ -558,6 +558,7 @@ class AttendanceProvider with ChangeNotifier {
           'department': profile.department,
           'office': profile.office,
           'phone': profile.phone,
+          'card_uid': profile.cardUid,
         },
       ).timeout(const Duration(seconds: 4));
 
@@ -1088,6 +1089,54 @@ class AttendanceProvider with ChangeNotifier {
             lecturer = parsed;
           }
         }
+        notifyListeners();
+        return true;
+      }
+    }
+
+    return false;
+  }
+
+  Future<bool> loginWithNfc(String cardUid) async {
+    final cardUidClean = cardUid.trim();
+    if (cardUidClean.isEmpty) return false;
+
+    // 1. Try online login first if server connection is active
+    if (isServerConnectionActive) {
+      try {
+        final response = await http.post(
+          Uri.parse('http://$serverIp/tap_attend/api/login_lecturer_nfc.php'),
+          body: {'card_uid': cardUidClean},
+        ).timeout(const Duration(seconds: 4));
+
+        if (response.statusCode == 200) {
+          final data = jsonDecode(response.body);
+          if (data['success'] == true) {
+            lecturer = Lecturer.fromJson(data['lecturer']);
+            cachedLecturerId = lecturer!.id;
+            await _saveData();
+            // Store the lecturer profile in a persistent cache so it's not lost on sign out
+            final prefs = await SharedPreferences.getInstance();
+            await prefs.setString('cachedLecturer', jsonEncode(lecturer!.toJson()));
+            notifyListeners();
+            return true;
+          }
+        }
+      } catch (_) {
+        // Fallback to offline check if network fails
+      }
+    }
+
+    // 2. Offline Mode verification against local cached profile
+    final prefs = await SharedPreferences.getInstance();
+    final lecturerJson = prefs.getString('cachedLecturer') ?? prefs.getString('lecturer');
+    if (lecturerJson != null) {
+      var cachedLecturer = Lecturer.fromJson(jsonDecode(lecturerJson));
+      if (cachedLecturer.id.isEmpty && cachedLecturerId != null) {
+        cachedLecturer = cachedLecturer.copyWith(id: cachedLecturerId);
+      }
+      if (cachedLecturer.cardUid != null && cachedLecturer.cardUid == cardUidClean) {
+        lecturer = cachedLecturer;
         notifyListeners();
         return true;
       }

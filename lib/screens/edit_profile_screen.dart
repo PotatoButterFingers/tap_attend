@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:nfc_manager/nfc_manager.dart';
 import 'package:provider/provider.dart';
 import 'package:tap_attend/providers/attendance_provider.dart';
 
@@ -16,6 +17,7 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
   late TextEditingController _emailController;
   late TextEditingController _phoneController;
   late TextEditingController _officeController;
+  late TextEditingController _cardUidController;
   bool _isSaving = false;
 
   @override
@@ -27,6 +29,7 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
     _emailController = TextEditingController(text: lecturer?.email);
     _phoneController = TextEditingController(text: lecturer?.phone);
     _officeController = TextEditingController(text: lecturer?.office);
+    _cardUidController = TextEditingController(text: lecturer?.cardUid);
   }
 
   @override
@@ -36,6 +39,7 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
     _emailController.dispose();
     _phoneController.dispose();
     _officeController.dispose();
+    _cardUidController.dispose();
     super.dispose();
   }
 
@@ -48,12 +52,14 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
       final provider = context.read<AttendanceProvider>();
       final currentLecturer = provider.lecturer;
       if (currentLecturer != null) {
+        final cardUidText = _cardUidController.text.trim();
         final updated = currentLecturer.copyWith(
           name: _nameController.text.trim(),
           department: _deptController.text.trim(),
           email: _emailController.text.trim(),
           phone: _phoneController.text.trim(),
           office: _officeController.text.trim(),
+          cardUid: cardUidText.isEmpty ? null : cardUidText,
         );
 
         final synced = await provider.updateLecturer(updated);
@@ -75,6 +81,107 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
         }
       }
     }
+  }
+
+  void _showScanCardDialog() {
+    String status = "Ready to Scan.\nHold your NFC card to the back of your phone.";
+    
+    try {
+      NfcManager.instance.startSession(
+        pollingOptions: {NfcPollingOption.iso14443, NfcPollingOption.iso15693},
+        onDiscovered: (NfcTag tag) async {
+          // ignore: invalid_use_of_protected_member
+          final Map<dynamic, dynamic> data = tag.data as Map<dynamic, dynamic>;
+          List<dynamic>? identifier;
+          if (data.containsKey('nfca')) {
+            identifier = (data['nfca'] as Map?)?['identifier'];
+          } else if (data.containsKey('mifareultralight')) {
+            identifier = (data['mifareultralight'] as Map?)?['identifier'];
+          } else if (data.containsKey('nfcb')) {
+            identifier = (data['nfcb'] as Map?)?['identifier'];
+          } else if (data.containsKey('nfcv')) {
+            identifier = (data['nfcv'] as Map?)?['identifier'];
+          } else if (data.containsKey('nfcf')) {
+            identifier = (data['nfcf'] as Map?)?['identifier'];
+          } else if (data.containsKey('isodep')) {
+            identifier = (data['isodep'] as Map?)?['identifier'];
+          }
+
+          String? scannedUid;
+          if (identifier != null) {
+            scannedUid = identifier
+                .map((e) => (e as int).toRadixString(16).padLeft(2, '0').toUpperCase())
+                .join(':');
+          }
+
+          if (scannedUid != null) {
+            NfcManager.instance.stopSession();
+            if (mounted) {
+              setState(() {
+                _cardUidController.text = scannedUid!;
+              });
+              Navigator.pop(context);
+              ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(
+                  content: Text('NFC card scanned: $scannedUid'),
+                  backgroundColor: Colors.green,
+                ),
+              );
+            }
+          }
+        },
+      );
+    } catch (_) {}
+
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) {
+        return AlertDialog(
+          title: const Text('Scan NFC Card'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Icon(Icons.nfc, size: 64, color: Colors.blue),
+              const SizedBox(height: 16),
+              Text(
+                status,
+                textAlign: TextAlign.center,
+                style: const TextStyle(fontSize: 14),
+              ),
+              const SizedBox(height: 24),
+              ElevatedButton(
+                onPressed: () {
+                  NfcManager.instance.stopSession();
+                  Navigator.pop(context);
+                  _cardUidController.text = 'lecturer_card_99';
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(
+                      content: Text('Simulated scan: lecturer_card_99'),
+                      backgroundColor: Colors.amber,
+                    ),
+                  );
+                },
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: Colors.amber[700],
+                  foregroundColor: Colors.white,
+                ),
+                child: const Text('Simulate Scan'),
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () {
+                NfcManager.instance.stopSession();
+                Navigator.pop(context);
+              },
+              child: const Text('Cancel'),
+            ),
+          ],
+        );
+      },
+    );
   }
 
   @override
@@ -185,6 +292,33 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
                     }
                     return null;
                   },
+                ),
+                const SizedBox(height: 16),
+
+                Text('NFC Card UID', style: Theme.of(context).textTheme.bodyMedium),
+                const SizedBox(height: 8),
+                Row(
+                  children: [
+                    Expanded(
+                      child: TextFormField(
+                        controller: _cardUidController,
+                        enabled: false,
+                        decoration: const InputDecoration(
+                          hintText: 'No card registered. Tap "Scan" to register.',
+                          prefixIcon: Icon(Icons.nfc),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    ElevatedButton.icon(
+                      onPressed: _isSaving ? null : _showScanCardDialog,
+                      icon: const Icon(Icons.sensors),
+                      label: const Text('Scan'),
+                      style: ElevatedButton.styleFrom(
+                        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
+                      ),
+                    ),
+                  ],
                 ),
                 const SizedBox(height: 32),
                 

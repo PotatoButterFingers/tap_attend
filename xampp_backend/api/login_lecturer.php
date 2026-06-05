@@ -19,7 +19,7 @@ if (!$lecturerId || !$password) {
 }
 
 // Query lecturer
-$stmt = $conn->prepare("SELECT lecturer_id, name, email, password_hash, department, office, phone FROM lecturers WHERE lecturer_id = ?");
+$stmt = $conn->prepare("SELECT lecturer_id, name, email, password_hash, department, office, phone, card_uid FROM lecturers WHERE lecturer_id = ?");
 $stmt->bind_param("s", $lecturerId);
 $stmt->execute();
 $result = $stmt->get_result();

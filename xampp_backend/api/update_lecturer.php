@@ -15,6 +15,7 @@ $email = $_POST['email'] ?? null;
 $department = $_POST['department'] ?? null;
 $office = $_POST['office'] ?? null;
 $phone = $_POST['phone'] ?? null;
+$cardUid = $_POST['card_uid'] ?? null;
 
 if (!$lecturerId || !$name || !$email || !$department || !$office || !$phone) {
     http_response_code(400);
@@ -23,8 +24,8 @@ if (!$lecturerId || !$name || !$email || !$department || !$office || !$phone) {
 }
 
 // Update lecturer in database
-$stmt = $conn->prepare("UPDATE lecturers SET name = ?, email = ?, department = ?, office = ?, phone = ? WHERE lecturer_id = ?");
-$stmt->bind_param("ssssss", $name, $email, $department, $office, $phone, $lecturerId);
+$stmt = $conn->prepare("UPDATE lecturers SET name = ?, email = ?, department = ?, office = ?, phone = ?, card_uid = ? WHERE lecturer_id = ?");
+$stmt->bind_param("sssssss", $name, $email, $department, $office, $phone, $cardUid, $lecturerId);
 
 if ($stmt->execute()) {
     echo json_encode(["success" => true, "message" => "Lecturer profile updated successfully"]);

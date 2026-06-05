@@ -54,6 +54,7 @@ CREATE TABLE IF NOT EXISTS `lecturers` (
   `name` VARCHAR(100) NOT NULL,
   `email` VARCHAR(100) NOT NULL,
   `password_hash` VARCHAR(255) NOT NULL,
+  `card_uid` VARCHAR(50) NULL UNIQUE,
   `department` VARCHAR(100) NOT NULL,
   `office` VARCHAR(100) NOT NULL,
   `phone` VARCHAR(30) NOT NULL,
@@ -61,8 +62,8 @@ CREATE TABLE IF NOT EXISTS `lecturers` (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 -- Seed default lecturer
-INSERT INTO `lecturers` (`lecturer_id`, `name`, `email`, `password_hash`, `department`, `office`, `phone`) VALUES
-('sharvin', 'Mr. Sharvin Ganeson', 'sharvin.ganeson@university.edu', '$2y$10$FKSqrtsFxfGr9PuAdtb.wu4zdIh2.uE/sToclxoNGjU/a29IPdiPu', 'Dept. of Computer Science', 'Engineering Bldg, Room 402', '+1 (555) 123-4567')
-ON DUPLICATE KEY UPDATE name=VALUES(name), email=VALUES(email), password_hash=VALUES(password_hash), department=VALUES(department), office=VALUES(office), phone=VALUES(phone);
+INSERT INTO `lecturers` (`lecturer_id`, `name`, `email`, `password_hash`, `card_uid`, `department`, `office`, `phone`) VALUES
+('sharvin', 'Mr. Sharvin Ganeson', 'sharvin.ganeson@university.edu', '$2y$10$FKSqrtsFxfGr9PuAdtb.wu4zdIh2.uE/sToclxoNGjU/a29IPdiPu', 'lecturer_card_1', 'Dept. of Computer Science', 'Engineering Bldg, Room 402', '+1 (555) 123-4567')
+ON DUPLICATE KEY UPDATE name=VALUES(name), email=VALUES(email), password_hash=VALUES(password_hash), card_uid=VALUES(card_uid), department=VALUES(department), office=VALUES(office), phone=VALUES(phone);
 
 

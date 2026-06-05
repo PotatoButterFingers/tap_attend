@@ -5,6 +5,7 @@ class Lecturer {
   final String email;
   final String phone;
   final String office;
+  final String? cardUid;
 
   Lecturer({
     required this.id,
@@ -13,6 +14,7 @@ class Lecturer {
     required this.email,
     required this.phone,
     required this.office,
+    this.cardUid,
   });
 
   Lecturer copyWith({
@@ -22,6 +24,7 @@ class Lecturer {
     String? email,
     String? phone,
     String? office,
+    String? cardUid,
   }) {
     return Lecturer(
       id: id ?? this.id,
@@ -30,6 +33,7 @@ class Lecturer {
       email: email ?? this.email,
       phone: phone ?? this.phone,
       office: office ?? this.office,
+      cardUid: cardUid ?? this.cardUid,
     );
   }
 
@@ -41,6 +45,7 @@ class Lecturer {
       'email': email,
       'phone': phone,
       'office': office,
+      'card_uid': cardUid,
     };
   }
 
@@ -52,6 +57,7 @@ class Lecturer {
       email: json['email'] ?? '',
       phone: json['phone'] ?? '',
       office: json['office'] ?? '',
+      cardUid: json['card_uid'],
     );
   }
 }
