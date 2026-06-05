@@ -30,7 +30,7 @@ class AttendanceProvider with ChangeNotifier {
   List<String> pendingDeletions = []; // Queue for offline deletions: studentId
   List<String> unsyncedSessionIds = []; // Queue for offline finished session IDs
   List<String> deletedStudentIds = []; // Local deleted student IDs
-  bool isServerOnline = true; // Simulated connection state (User can toggle in Sync Screen)
+  bool isServerConnectionActive = false; // Actual connection state
   String? activeLateSessionId; // If set, NFC scans record late attendance for this past session instead of currentSession
   String serverIp = '10.0.2.2'; // Use 10.0.2.2 for Android emulator gateway, localhost for iOS, or computer's local IP (e.g. 192.168.x.x) for physical phones
 
@@ -88,7 +88,6 @@ class AttendanceProvider with ChangeNotifier {
     pendingDeletions = prefs.getStringList('pendingDeletions') ?? [];
     unsyncedSessionIds = prefs.getStringList('unsyncedSessionIds') ?? [];
     deletedStudentIds = prefs.getStringList('deletedStudentIds') ?? [];
-    isServerOnline = prefs.getBool('isServerOnline') ?? true;
 
     notifyListeners();
   }
@@ -126,7 +125,6 @@ class AttendanceProvider with ChangeNotifier {
     await prefs.setStringList('pendingDeletions', pendingDeletions);
     await prefs.setStringList('unsyncedSessionIds', unsyncedSessionIds);
     await prefs.setStringList('deletedStudentIds', deletedStudentIds);
-    await prefs.setBool('isServerOnline', isServerOnline);
   }
 
   Future<void> updateLecturer(Lecturer updated) async {
@@ -367,18 +365,22 @@ class AttendanceProvider with ChangeNotifier {
 
   // --- XAMPP API Communication & Syncing ---
 
-  void toggleServerOnline(bool status) {
-    isServerOnline = status;
-    _saveData();
+  Future<bool> checkServerConnection() async {
+    try {
+      final response = await http.get(Uri.parse('http://$serverIp/tap_attend/api/db_connect.php')).timeout(const Duration(seconds: 2));
+      isServerConnectionActive = (response.statusCode == 200);
+    } catch (_) {
+      isServerConnectionActive = false;
+    }
     notifyListeners();
-    if (isServerOnline) {
-      // Auto-trigger sync when connectivity is restored
+    if (isServerConnectionActive && (pendingRegistrations.isNotEmpty || pendingDeletions.isNotEmpty || unsyncedSessionIds.isNotEmpty)) {
+      // Auto-trigger sync when connectivity is verified and there is data in queue
       syncAllPendingData();
     }
+    return isServerConnectionActive;
   }
 
   Future<bool> _trySyncStudentToXampp(String id, String name, String cardUid, String subjectCode) async {
-    if (!isServerOnline) return false;
     try {
       final response = await http.post(
         Uri.parse('http://$serverIp/tap_attend/api/register_student.php'),
@@ -391,7 +393,6 @@ class AttendanceProvider with ChangeNotifier {
   }
 
   Future<bool> _trySyncDeleteToXampp(String studentId) async {
-    if (!isServerOnline) return false;
     try {
       final response = await http.post(
         Uri.parse('http://$serverIp/tap_attend/api/delete_student.php'),
@@ -404,7 +405,6 @@ class AttendanceProvider with ChangeNotifier {
   }
 
   Future<bool> _trySyncSessionToXampp(ClassSession session) async {
-    if (!isServerOnline) return false;
     try {
       final response = await http.post(
         Uri.parse('http://$serverIp/tap_attend/api/submit_attendance.php'),
@@ -419,7 +419,7 @@ class AttendanceProvider with ChangeNotifier {
 
   // Tries to upload all queued offline records
   Future<void> syncAllPendingData() async {
-    if (!isServerOnline) return;
+    if (!isServerConnectionActive) return;
 
     // 1. Sync pending student registrations
     final registrationsToSync = List<Map<String, dynamic>>.from(pendingRegistrations);
@@ -734,7 +734,6 @@ class AttendanceProvider with ChangeNotifier {
   }
 
   Future<bool> _trySyncDeleteSessionToXampp(String sessionId) async {
-    if (!isServerOnline) return false;
     try {
       final response = await http.post(
         Uri.parse('http://$serverIp/tap_attend/api/delete_session.php'),
@@ -747,7 +746,6 @@ class AttendanceProvider with ChangeNotifier {
   }
 
   Future<bool> _trySyncClearAllSessionsToXampp() async {
-    if (!isServerOnline) return false;
     try {
       final response = await http.post(
         Uri.parse('http://$serverIp/tap_attend/api/clear_all_sessions.php'),

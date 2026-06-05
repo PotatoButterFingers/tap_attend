@@ -36,6 +36,9 @@ class _CardRegistrationScreenState extends State<CardRegistrationScreen>
         AnimationController(vsync: this, duration: const Duration(seconds: 2))
           ..repeat();
     _startNfcScan();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      context.read<AttendanceProvider>().checkServerConnection();
+    });
   }
 
   @override
@@ -160,7 +163,7 @@ class _CardRegistrationScreenState extends State<CardRegistrationScreen>
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(
-            provider.isServerOnline
+            provider.isServerConnectionActive
                 ? 'Registered ${_nameController.text} and synced to server!'
                 : 'Registered locally. Will sync when online.',
           ),
@@ -198,28 +201,28 @@ class _CardRegistrationScreenState extends State<CardRegistrationScreen>
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
                 decoration: BoxDecoration(
-                  color: (provider.isServerOnline ? Colors.green : Colors.orange)
+                  color: (provider.isServerConnectionActive ? Colors.green : Colors.orange)
                       .withValues(alpha: 0.1),
                   borderRadius: BorderRadius.circular(12),
                   border: Border.all(
-                    color: (provider.isServerOnline ? Colors.green : Colors.orange)
+                    color: (provider.isServerConnectionActive ? Colors.green : Colors.orange)
                         .withValues(alpha: 0.2),
                   ),
                 ),
                 child: Row(
                   children: [
                     Icon(
-                      provider.isServerOnline ? Icons.cloud_done : Icons.cloud_off,
-                      color: provider.isServerOnline ? Colors.green : Colors.orange,
+                      provider.isServerConnectionActive ? Icons.cloud_done : Icons.cloud_off,
+                      color: provider.isServerConnectionActive ? Colors.green : Colors.orange,
                     ),
                     const SizedBox(width: 12),
                     Text(
-                      provider.isServerOnline
+                      provider.isServerConnectionActive
                           ? 'Connected: Synced to XAMPP'
                           : 'Offline: Saving to Pending Queue',
                       style: TextStyle(
                         fontWeight: FontWeight.bold,
-                        color: provider.isServerOnline ? Colors.green : Colors.orange,
+                        color: provider.isServerConnectionActive ? Colors.green : Colors.orange,
                       ),
                     ),
                   ],

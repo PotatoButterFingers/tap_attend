@@ -12,10 +12,37 @@ class SyncQueueScreen extends StatefulWidget {
 class _SyncQueueScreenState extends State<SyncQueueScreen> {
   bool _isSyncing = false;
 
+  @override
+  void initState() {
+    super.initState();
+    // Test server connectivity as soon as the screen loads
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      context.read<AttendanceProvider>().checkServerConnection();
+    });
+  }
+
   Future<void> _handleSyncNow(AttendanceProvider provider) async {
     setState(() {
       _isSyncing = true;
     });
+
+    // Test connectivity first
+    final isOnline = await provider.checkServerConnection();
+    
+    if (!isOnline) {
+      if (mounted) {
+        setState(() {
+          _isSyncing = false;
+        });
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Cannot reach XAMPP server. Please start Apache/MySQL and verify the IP.'),
+            backgroundColor: Colors.redAccent,
+          ),
+        );
+      }
+      return;
+    }
 
     // Run sync execution
     await provider.syncAllPendingData();
@@ -67,7 +94,7 @@ class _SyncQueueScreenState extends State<SyncQueueScreen> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              // Server Connectivity Simulation Card
+              // Server Connectivity Status Card
               Container(
                 padding: const EdgeInsets.all(20),
                 decoration: BoxDecoration(
@@ -91,31 +118,64 @@ class _SyncQueueScreenState extends State<SyncQueueScreen> {
                           'XAMPP Server Status',
                           style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold),
                         ),
-                        Switch(
-                          value: provider.isServerOnline,
-                          onChanged: (value) {
-                            provider.toggleServerOnline(value);
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              SnackBar(
-                                content: Text(
-                                  value
-                                      ? 'Server connection enabled. Starting auto-sync...'
-                                      : 'Server offline mode enabled. All scans will cache locally.',
+                        // Connection Status Badge
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                          decoration: BoxDecoration(
+                            color: provider.isServerConnectionActive
+                                ? Colors.green.withValues(alpha: 0.1)
+                                : Colors.red.withValues(alpha: 0.1),
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Container(
+                                width: 8,
+                                height: 8,
+                                decoration: BoxDecoration(
+                                  shape: BoxShape.circle,
+                                  color: provider.isServerConnectionActive ? Colors.green : Colors.red,
                                 ),
-                                duration: const Duration(seconds: 2),
                               ),
-                            );
-                          },
-                          activeThumbColor: Colors.blue,
+                              const SizedBox(width: 6),
+                              Text(
+                                provider.isServerConnectionActive ? 'ONLINE' : 'OFFLINE',
+                                style: TextStyle(
+                                  color: provider.isServerConnectionActive ? Colors.green : Colors.red,
+                                  fontSize: 10,
+                                  fontWeight: FontWeight.bold,
+                                  letterSpacing: 0.5,
+                                ),
+                              ),
+                            ],
+                          ),
                         ),
                       ],
                     ),
-                    const SizedBox(height: 8),
+                    const SizedBox(height: 12),
                     Text(
-                      provider.isServerOnline
-                          ? 'The app is simulating an active connection to your local XAMPP server (Apache/PHP). Scans sync immediately.'
-                          : 'The app is simulating an offline network state. All scanned attendance and registered cards will queue locally.',
+                      provider.isServerConnectionActive
+                          ? 'Connected to local XAMPP server at http://${provider.serverIp}. Scans and registrations sync instantly.'
+                          : 'Cannot reach XAMPP server at http://${provider.serverIp}. Attendance data and registrations are safely queued locally and will sync when the server becomes online.',
                       style: const TextStyle(color: Colors.grey, fontSize: 12, height: 1.4),
+                    ),
+                    const Divider(height: 24),
+                    SizedBox(
+                      width: double.infinity,
+                      child: TextButton.icon(
+                        onPressed: _isSyncing 
+                            ? null 
+                            : () => provider.checkServerConnection(),
+                        icon: const Icon(Icons.refresh, size: 16),
+                        label: const Text('Test Connection & Auto-Sync', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12)),
+                        style: TextButton.styleFrom(
+                          padding: const EdgeInsets.symmetric(vertical: 12),
+                          backgroundColor: Theme.of(context).primaryColor.withValues(alpha: 0.05),
+                          foregroundColor: Theme.of(context).primaryColor,
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                        ),
+                      ),
                     ),
                   ],
                 ),
@@ -153,7 +213,7 @@ class _SyncQueueScreenState extends State<SyncQueueScreen> {
                       ),
                       const SizedBox(width: 8),
                       ElevatedButton(
-                        onPressed: (provider.isServerOnline && !_isSyncing)
+                        onPressed: (provider.isServerConnectionActive && !_isSyncing)
                             ? () => _handleSyncNow(provider)
                             : null,
                         style: ElevatedButton.styleFrom(
@@ -194,7 +254,6 @@ class _SyncQueueScreenState extends State<SyncQueueScreen> {
                         color: Colors.blue,
                         icon: Icons.history,
                         items: provider.unsyncedSessionIds.map((id) {
-                          // Find past session
                           final sessionIdx = provider.pastSessions.indexWhere((s) => s.id == id);
                           final name = sessionIdx != -1
                               ? '${provider.pastSessions[sessionIdx].subjectCode}: ${provider.pastSessions[sessionIdx].scannedStudents.length} present'

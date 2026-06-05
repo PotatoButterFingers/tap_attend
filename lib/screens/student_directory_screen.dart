@@ -15,6 +15,14 @@ class _StudentDirectoryScreenState extends State<StudentDirectoryScreen> {
   String _searchQuery = '';
 
   @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      context.read<AttendanceProvider>().checkServerConnection();
+    });
+  }
+
+  @override
   Widget build(BuildContext context) {
     final provider = Provider.of<AttendanceProvider>(context);
     
@@ -96,7 +104,7 @@ class _StudentDirectoryScreenState extends State<StudentDirectoryScreen> {
                                         ScaffoldMessenger.of(context).showSnackBar(
                                           SnackBar(
                                             content: Text(
-                                              provider.isServerOnline
+                                              provider.isServerConnectionActive
                                                   ? 'Deleted ${student.name} and synced to server'
                                                   : 'Deleted locally. Will sync when online.',
                                             ),
