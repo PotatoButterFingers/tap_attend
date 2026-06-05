@@ -83,41 +83,112 @@ class AttendanceProvider with ChangeNotifier {
   }
 
   void _initMockSession() {
-    currentSession = ClassSession(
-      id: 's1',
-      subjectCode: 'CS101',
-      subjectName: 'Introduction to Data Structures & Algorithms',
-      room: 'Lecture Hall B2, Engineering Wing',
-      startTime: DateTime.now().copyWith(hour: 10, minute: 0),
-      endTime: DateTime.now().copyWith(hour: 11, minute: 30),
-      totalEnrolled: 48,
-      previousAverageScore: 92,
-      students: [
-        Student(
-          id: '1',
-          name: 'Benjamin Miller',
-          deviceId: 'tag_1',
-          isVerified: true,
-        ),
-        Student(
-          id: '2',
-          name: 'Sophia Chen',
-          deviceId: 'tag_2',
-          isVerified: true,
-        ),
-        Student(
-          id: '3',
-          name: 'Marcus Wright',
-          deviceId: 'tag_3',
-          isVerified: true,
-        ),
-      ],
-      scannedStudents: [],
-    );
+    loadSessionByCode('CS101');
   }
 
   void loadMockSession() {
-    _initMockSession();
+    loadSessionByCode('CS101');
+  }
+
+  void loadSessionByCode(String subjectCode) {
+    if (subjectCode == 'CS202') {
+      currentSession = ClassSession(
+        id: 's2',
+        subjectCode: 'CS202',
+        subjectName: 'Advanced Algorithms',
+        room: 'Hall A, Main Building',
+        startTime: DateTime.now().copyWith(hour: 13, minute: 30),
+        endTime: DateTime.now().copyWith(hour: 15, minute: 0),
+        totalEnrolled: 32,
+        previousAverageScore: 88,
+        students: [
+          Student(
+            id: '201',
+            name: 'Emma Watson',
+            deviceId: 'tag_4',
+            isVerified: true,
+          ),
+          Student(
+            id: '202',
+            name: 'Liam Neeson',
+            deviceId: 'tag_5',
+            isVerified: true,
+          ),
+          Student(
+            id: '203',
+            name: 'Olivia Wilde',
+            deviceId: 'tag_6',
+            isVerified: true,
+          ),
+        ],
+        scannedStudents: [],
+      );
+    } else if (subjectCode == 'CS303') {
+      currentSession = ClassSession(
+        id: 's3',
+        subjectCode: 'CS303',
+        subjectName: 'Data Structures',
+        room: 'Lab 1, Engineering Building',
+        startTime: DateTime.now().copyWith(hour: 15, minute: 15),
+        endTime: DateTime.now().copyWith(hour: 16, minute: 45),
+        totalEnrolled: 45,
+        previousAverageScore: 90,
+        students: [
+          Student(
+            id: '301',
+            name: 'Noah Centineo',
+            deviceId: 'tag_7',
+            isVerified: true,
+          ),
+          Student(
+            id: '302',
+            name: 'Ava DuVernay',
+            deviceId: 'tag_8',
+            isVerified: true,
+          ),
+          Student(
+            id: '303',
+            name: 'Lucas Hedges',
+            deviceId: 'tag_9',
+            isVerified: true,
+          ),
+        ],
+        scannedStudents: [],
+      );
+    } else {
+      // Default to CS101 (Computer Science 101)
+      currentSession = ClassSession(
+        id: 's1',
+        subjectCode: 'CS101',
+        subjectName: 'Computer Science 101',
+        room: 'Lab 3, Engineering Building',
+        startTime: DateTime.now().copyWith(hour: 10, minute: 0),
+        endTime: DateTime.now().copyWith(hour: 11, minute: 30),
+        totalEnrolled: 48,
+        previousAverageScore: 92,
+        students: [
+          Student(
+            id: '101',
+            name: 'Benjamin Miller',
+            deviceId: 'tag_1',
+            isVerified: true,
+          ),
+          Student(
+            id: '102',
+            name: 'Sophia Chen',
+            deviceId: 'tag_2',
+            isVerified: true,
+          ),
+          Student(
+            id: '103',
+            name: 'Marcus Wright',
+            deviceId: 'tag_3',
+            isVerified: true,
+          ),
+        ],
+        scannedStudents: [],
+      );
+    }
     _saveData();
     notifyListeners();
   }

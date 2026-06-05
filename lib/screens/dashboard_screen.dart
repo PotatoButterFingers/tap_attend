@@ -114,8 +114,7 @@ class DashboardScreen extends StatelessWidget {
                 location: 'Lab 3 • Engineering Building',
                 tag: 'UPCOMING',
                 onTap: () {
-                  // Preload mock session and navigate to session overview
-                  context.read<AttendanceProvider>().loadMockSession();
+                  context.read<AttendanceProvider>().loadSessionByCode('CS101');
                   Navigator.push(context, MaterialPageRoute(builder: (_) => const SessionOverviewScreen()));
                 },
               ),
@@ -126,6 +125,10 @@ class DashboardScreen extends StatelessWidget {
                 location: 'Hall A • Main Building',
                 tag: 'POSTGRADUATE',
                 tagColor: Colors.orange,
+                onTap: () {
+                  context.read<AttendanceProvider>().loadSessionByCode('CS202');
+                  Navigator.push(context, MaterialPageRoute(builder: (_) => const SessionOverviewScreen()));
+                },
               ),
               _buildScheduleCard(
                 context,
@@ -134,6 +137,10 @@ class DashboardScreen extends StatelessWidget {
                 location: 'Lab 1 • Engineering Building',
                 tag: 'UNDERGRADUATE',
                 tagColor: Colors.purple,
+                onTap: () {
+                  context.read<AttendanceProvider>().loadSessionByCode('CS303');
+                  Navigator.push(context, MaterialPageRoute(builder: (_) => const SessionOverviewScreen()));
+                },
               ),
               _buildScheduleCard(
                 context,
