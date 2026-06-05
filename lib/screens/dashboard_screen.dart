@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:tap_attend/providers/attendance_provider.dart';
@@ -15,6 +16,7 @@ class DashboardScreen extends StatefulWidget {
 class _DashboardScreenState extends State<DashboardScreen> {
   late DateTime _selectedDate;
   late final DateTime _mockToday;
+  Timer? _clockTimer;
 
   @override
   void initState() {
@@ -22,6 +24,19 @@ class _DashboardScreenState extends State<DashboardScreen> {
     final now = DateTime.now();
     _mockToday = DateTime(now.year, now.month, now.day);
     _selectedDate = _mockToday;
+
+    // Tick the clock every minute to keep the date & time dynamically in sync
+    _clockTimer = Timer.periodic(const Duration(seconds: 30), (timer) {
+      if (mounted) {
+        setState(() {});
+      }
+    });
+  }
+
+  @override
+  void dispose() {
+    _clockTimer?.cancel();
+    super.dispose();
   }
 
   String _formatDisplayDate(DateTime date) {
@@ -44,14 +59,37 @@ class _DashboardScreenState extends State<DashboardScreen> {
     return '$weekday, $month $day$suffix, ${date.year}';
   }
 
+  String _formatTime(DateTime time) {
+    int hour = time.hour;
+    int min = time.minute;
+    String ampm = hour >= 12 ? 'PM' : 'AM';
+    if (hour > 12) hour -= 12;
+    if (hour == 0) hour = 12;
+    String minStr = min < 10 ? '0$min' : '$min';
+    return '$hour:$minStr $ampm';
+  }
+
+  DateTime _getClassStartTime(String subjectCode, DateTime date) {
+    if (subjectCode == 'CS101') return DateTime(date.year, date.month, date.day, 10, 0);
+    if (subjectCode == 'CS202') return DateTime(date.year, date.month, date.day, 13, 30);
+    return DateTime(date.year, date.month, date.day, 15, 15);
+  }
+
+  DateTime _getClassEndTime(String subjectCode, DateTime date) {
+    if (subjectCode == 'CS101') return DateTime(date.year, date.month, date.day, 11, 30);
+    if (subjectCode == 'CS202') return DateTime(date.year, date.month, date.day, 15, 0);
+    return DateTime(date.year, date.month, date.day, 16, 45);
+  }
+
   void _handleClassTap(BuildContext context, String subjectCode, String subjectName) {
     final provider = context.read<AttendanceProvider>();
+    final now = DateTime.now();
     
     final selectedDateOnly = DateTime(_selectedDate.year, _selectedDate.month, _selectedDate.day);
-    final mockTodayOnly = DateTime(_mockToday.year, _mockToday.month, _mockToday.day);
+    final todayOnly = DateTime(now.year, now.month, now.day);
     
-    if (selectedDateOnly.isBefore(mockTodayOnly)) {
-      // Past session: Retrieve or create, and open late attendance screen
+    if (selectedDateOnly.isBefore(todayOnly)) {
+      // Past day: Open retrospective late recording
       final session = provider.getOrCreatePastSession(subjectCode, _selectedDate);
       Navigator.push(
         context,
@@ -59,8 +97,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
           builder: (_) => LateAttendanceScreen(session: session),
         ),
       );
-    } else if (selectedDateOnly.isAfter(mockTodayOnly)) {
-      // Future session: warn user
+    } else if (selectedDateOnly.isAfter(todayOnly)) {
+      // Future day: warn user
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text('Cannot record attendance for a future class date.'),
@@ -68,12 +106,25 @@ class _DashboardScreenState extends State<DashboardScreen> {
         ),
       );
     } else {
-      // Today: Active recording flow
-      provider.loadSessionByCode(subjectCode);
-      Navigator.push(
-        context,
-        MaterialPageRoute(builder: (_) => const SessionOverviewScreen()),
-      );
+      // Today: evaluate time slot
+      final classEnd = _getClassEndTime(subjectCode, now);
+      if (now.isAfter(classEnd)) {
+        // Today past: Open late attendance
+        final session = provider.getOrCreatePastSession(subjectCode, now);
+        Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (_) => LateAttendanceScreen(session: session),
+          ),
+        );
+      } else {
+        // Today active or upcoming: Open live session scanner
+        provider.loadSessionByCode(subjectCode);
+        Navigator.push(
+          context,
+          MaterialPageRoute(builder: (_) => const SessionOverviewScreen()),
+        );
+      }
     }
   }
 
@@ -85,14 +136,16 @@ class _DashboardScreenState extends State<DashboardScreen> {
     required String location,
   }) {
     final provider = context.watch<AttendanceProvider>();
+    final now = DateTime.now();
     
     final selectedDateOnly = DateTime(_selectedDate.year, _selectedDate.month, _selectedDate.day);
-    final mockTodayOnly = DateTime(_mockToday.year, _mockToday.month, _mockToday.day);
+    final todayOnly = DateTime(now.year, now.month, now.day);
     
     String tag;
     Color tagColor;
     
-    if (selectedDateOnly.isBefore(mockTodayOnly)) {
+    if (selectedDateOnly.isBefore(todayOnly)) {
+      // Past day
       final existingIdx = provider.pastSessions.indexWhere((s) => 
         s.subjectCode == subjectCode &&
         s.startTime.year == _selectedDate.year &&
@@ -107,12 +160,40 @@ class _DashboardScreenState extends State<DashboardScreen> {
         tag = 'NO RECORD';
         tagColor = Colors.redAccent;
       }
-    } else if (selectedDateOnly.isAfter(mockTodayOnly)) {
+    } else if (selectedDateOnly.isAfter(todayOnly)) {
+      // Future day
       tag = 'FUTURE SESSION';
       tagColor = Colors.grey;
     } else {
-      tag = 'TODAY - LIVE';
-      tagColor = Colors.blue;
+      // Today: Evaluate using system clock time comparison
+      final classStart = _getClassStartTime(subjectCode, now);
+      final classEnd = _getClassEndTime(subjectCode, now);
+      
+      if (now.isAfter(classEnd)) {
+        // Today but ended
+        final existingIdx = provider.pastSessions.indexWhere((s) => 
+          s.subjectCode == subjectCode &&
+          s.startTime.year == now.year &&
+          s.startTime.month == now.month &&
+          s.startTime.day == now.day
+        );
+        if (existingIdx != -1) {
+          final session = provider.pastSessions[existingIdx];
+          tag = 'COMPLETED (${session.scannedStudents.length}/${session.totalEnrolled})';
+          tagColor = Colors.green;
+        } else {
+          tag = 'NO RECORD (ENDED)';
+          tagColor = Colors.redAccent;
+        }
+      } else if (now.isAfter(classStart) && now.isBefore(classEnd)) {
+        // Active class
+        tag = 'LIVE NOW';
+        tagColor = Colors.blue;
+      } else {
+        // Upcoming today
+        tag = 'UPCOMING';
+        tagColor = Colors.orange;
+      }
     }
     
     return _buildScheduleCard(
@@ -197,10 +278,15 @@ class _DashboardScreenState extends State<DashboardScreen> {
               ),
               const SizedBox(height: 8),
               
-              // Dynamic Date Display
+              // Dynamic Date and Time Display
               Row(
                 children: [
-                  Text(_formatDisplayDate(_selectedDate), style: Theme.of(context).textTheme.bodyMedium),
+                  Text(
+                    isShowingToday 
+                        ? '${_formatDisplayDate(_selectedDate)} • ${_formatTime(DateTime.now())}' 
+                        : _formatDisplayDate(_selectedDate), 
+                    style: Theme.of(context).textTheme.bodyMedium,
+                  ),
                   if (!isShowingToday) ...[
                     const SizedBox(width: 8),
                     GestureDetector(
