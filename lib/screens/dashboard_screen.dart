@@ -101,7 +101,7 @@ class DashboardScreen extends StatelessWidget {
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
                   Text('Today\'s Schedule', style: Theme.of(context).textTheme.titleLarge),
-                  TextButton(onPressed: () {}, child: const Text('4 Classes')),
+                  TextButton(onPressed: () {}, child: const Text('3 Classes')),
                 ],
               ),
               const SizedBox(height: 16),
@@ -141,14 +141,6 @@ class DashboardScreen extends StatelessWidget {
                   context.read<AttendanceProvider>().loadSessionByCode('CS303');
                   Navigator.push(context, MaterialPageRoute(builder: (_) => const SessionOverviewScreen()));
                 },
-              ),
-              _buildScheduleCard(
-                context,
-                subject: 'Faculty Meeting',
-                time: '05:00 PM - 06:00 PM',
-                location: 'Conference Room 4',
-                tag: 'SEMINAR',
-                tagColor: Colors.grey,
               ),
             ],
           ),
