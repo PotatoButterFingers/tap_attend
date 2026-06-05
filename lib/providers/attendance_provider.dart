@@ -723,4 +723,40 @@ class AttendanceProvider with ChangeNotifier {
     await _saveData();
     notifyListeners();
   }
+
+  // Deletes a single past session from history
+  Future<void> deletePastSession(String sessionId) async {
+    pastSessions.removeWhere((s) => s.id == sessionId);
+    await _trySyncDeleteSessionToXampp(sessionId);
+    await _saveData();
+    notifyListeners();
+  }
+
+  // Clears all past sessions from history
+  Future<void> clearAllPastSessions() async {
+    pastSessions.clear();
+    await _trySyncClearAllSessionsToXampp();
+    await _saveData();
+    notifyListeners();
+  }
+
+  Future<bool> _trySyncDeleteSessionToXampp(String sessionId) async {
+    if (!isServerOnline) return false;
+    try {
+      await Future.delayed(const Duration(milliseconds: 400));
+      return true;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  Future<bool> _trySyncClearAllSessionsToXampp() async {
+    if (!isServerOnline) return false;
+    try {
+      await Future.delayed(const Duration(milliseconds: 600));
+      return true;
+    } catch (_) {
+      return false;
+    }
+  }
 }

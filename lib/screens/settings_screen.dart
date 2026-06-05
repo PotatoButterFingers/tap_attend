@@ -5,6 +5,7 @@ import 'package:tap_attend/screens/profile_screen.dart';
 import 'package:tap_attend/screens/student_directory_screen.dart';
 import 'package:tap_attend/screens/login_screen.dart';
 import 'package:tap_attend/screens/sync_queue_screen.dart';
+import 'package:tap_attend/screens/manage_history_screen.dart';
 
 class SettingsScreen extends StatelessWidget {
   const SettingsScreen({super.key});
@@ -116,6 +117,23 @@ class SettingsScreen extends StatelessWidget {
                   : const Icon(Icons.arrow_forward_ios, size: 16),
               onTap: () {
                 Navigator.push(context, MaterialPageRoute(builder: (_) => const SyncQueueScreen()));
+              },
+            ),
+            const SizedBox(height: 16),
+            ListTile(
+              leading: Container(
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(
+                  color: Colors.red.withValues(alpha: 0.1),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: const Icon(Icons.delete_sweep, color: Colors.red),
+              ),
+              title: const Text('Manage History'),
+              subtitle: const Text('Delete past session recordings'),
+              trailing: const Icon(Icons.arrow_forward_ios, size: 16),
+              onTap: () {
+                Navigator.push(context, MaterialPageRoute(builder: (_) => const ManageHistoryScreen()));
               },
             ),
             const SizedBox(height: 16),
