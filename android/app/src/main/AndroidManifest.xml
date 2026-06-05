@@ -1,6 +1,6 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
     <application
-        android:label="tap_attend"
+        android:label="TapAttend"
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher">
         <activity
