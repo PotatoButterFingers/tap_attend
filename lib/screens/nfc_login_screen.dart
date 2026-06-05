@@ -170,7 +170,7 @@ class _NfcLoginScreenState extends State<NfcLoginScreen> with SingleTickerProvid
         );
       } else {
         setState(() {
-          _errorMessage = "Invalid card. This NFC card is not registered to any lecturer.";
+          _errorMessage = "Invalid card (UID: $cardUid). This NFC card is not registered to any lecturer.";
         });
         // Restart NFC listening for retry
         _startNfcSession();
