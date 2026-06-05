@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
-import 'package:tap_attend/models/lecturer.dart';
 import 'package:tap_attend/providers/attendance_provider.dart';
 
 class EditProfileScreen extends StatefulWidget {
@@ -17,6 +16,7 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
   late TextEditingController _emailController;
   late TextEditingController _phoneController;
   late TextEditingController _officeController;
+  bool _isSaving = false;
 
   @override
   void initState() {
@@ -39,20 +39,41 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
     super.dispose();
   }
 
-  void _handleSave() {
+  Future<void> _handleSave() async {
     if (_formKey.currentState!.validate()) {
-      final updated = Lecturer(
-        name: _nameController.text.trim(),
-        department: _deptController.text.trim(),
-        email: _emailController.text.trim(),
-        phone: _phoneController.text.trim(),
-        office: _officeController.text.trim(),
-      );
-      context.read<AttendanceProvider>().updateLecturer(updated);
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Profile updated successfully!')),
-      );
-      Navigator.pop(context);
+      setState(() {
+        _isSaving = true;
+      });
+
+      final provider = context.read<AttendanceProvider>();
+      final currentLecturer = provider.lecturer;
+      if (currentLecturer != null) {
+        final updated = currentLecturer.copyWith(
+          name: _nameController.text.trim(),
+          department: _deptController.text.trim(),
+          email: _emailController.text.trim(),
+          phone: _phoneController.text.trim(),
+          office: _officeController.text.trim(),
+        );
+
+        final synced = await provider.updateLecturer(updated);
+
+        if (mounted) {
+          setState(() {
+            _isSaving = false;
+          });
+
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(synced 
+                ? 'Profile updated and synced with database!' 
+                : 'Profile updated locally (will sync when online).'),
+              backgroundColor: synced ? Colors.green : Colors.orange,
+            ),
+          );
+          Navigator.pop(context);
+        }
+      }
     }
   }
 
@@ -76,6 +97,7 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
                 const SizedBox(height: 8),
                 TextFormField(
                   controller: _nameController,
+                  enabled: !_isSaving,
                   decoration: const InputDecoration(
                     hintText: 'e.g. Dr. Robert Smith',
                     prefixIcon: Icon(Icons.person_outline),
@@ -93,6 +115,7 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
                 const SizedBox(height: 8),
                 TextFormField(
                   controller: _deptController,
+                  enabled: !_isSaving,
                   decoration: const InputDecoration(
                     hintText: 'e.g. Dept. of Computer Science',
                     prefixIcon: Icon(Icons.school_outlined),
@@ -110,6 +133,7 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
                 const SizedBox(height: 8),
                 TextFormField(
                   controller: _emailController,
+                  enabled: !_isSaving,
                   decoration: const InputDecoration(
                     hintText: 'e.g. robert.smith@university.edu',
                     prefixIcon: Icon(Icons.email_outlined),
@@ -131,6 +155,7 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
                 const SizedBox(height: 8),
                 TextFormField(
                   controller: _phoneController,
+                  enabled: !_isSaving,
                   decoration: const InputDecoration(
                     hintText: 'e.g. +1 (555) 123-4567',
                     prefixIcon: Icon(Icons.phone_outlined),
@@ -149,6 +174,7 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
                 const SizedBox(height: 8),
                 TextFormField(
                   controller: _officeController,
+                  enabled: !_isSaving,
                   decoration: const InputDecoration(
                     hintText: 'e.g. Engineering Bldg, Room 402',
                     prefixIcon: Icon(Icons.location_on_outlined),
@@ -163,8 +189,14 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
                 const SizedBox(height: 32),
                 
                 ElevatedButton(
-                  onPressed: _handleSave,
-                  child: const Text('Save Changes', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+                  onPressed: _isSaving ? null : _handleSave,
+                  child: _isSaving
+                      ? const SizedBox(
+                          width: 20,
+                          height: 20,
+                          child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2),
+                        )
+                      : const Text('Save Changes', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
                 ),
               ],
             ),

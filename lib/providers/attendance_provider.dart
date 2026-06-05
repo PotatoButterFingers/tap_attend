@@ -28,6 +28,7 @@ class AttendanceProvider with ChangeNotifier {
   List<String> unsyncedSessionIds = []; // Queue for offline finished session IDs
   List<String> deletedStudentIds = []; // Local deleted student IDs
   bool isServerConnectionActive = false; // Actual connection state
+  bool isLecturerProfileUnsynced = false; // True if lecturer edits were made offline and need sync
   String? activeLateSessionId; // If set, NFC scans record late attendance for this past session instead of currentSession
   String serverIp = '10.0.2.2'; // Use 10.0.2.2 for Android emulator gateway, localhost for iOS, or computer's local IP (e.g. 192.168.x.x) for physical phones
 
@@ -117,6 +118,7 @@ class AttendanceProvider with ChangeNotifier {
     pendingDeletions = prefs.getStringList('pendingDeletions') ?? [];
     unsyncedSessionIds = prefs.getStringList('unsyncedSessionIds') ?? [];
     deletedStudentIds = prefs.getStringList('deletedStudentIds') ?? [];
+    isLecturerProfileUnsynced = prefs.getBool('isLecturerProfileUnsynced') ?? false;
 
     notifyListeners();
   }
@@ -170,6 +172,7 @@ class AttendanceProvider with ChangeNotifier {
     await prefs.setStringList('pendingDeletions', pendingDeletions);
     await prefs.setStringList('unsyncedSessionIds', unsyncedSessionIds);
     await prefs.setStringList('deletedStudentIds', deletedStudentIds);
+    await prefs.setBool('isLecturerProfileUnsynced', isLecturerProfileUnsynced);
   }
 
   Future<void> updateServerIp(String ip) async {
@@ -179,10 +182,25 @@ class AttendanceProvider with ChangeNotifier {
     await checkServerConnection();
   }
 
-  Future<void> updateLecturer(Lecturer updated) async {
+  Future<bool> updateLecturer(Lecturer updated) async {
     lecturer = updated;
     await _saveData();
+    // Update cachedLecturer in SharedPreferences so offline login has the updated profile
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString('cachedLecturer', jsonEncode(updated.toJson()));
     notifyListeners();
+
+    // Try to sync with server
+    bool success = await _trySyncLecturerProfileToXampp(updated);
+    if (success) {
+      isLecturerProfileUnsynced = false;
+    } else {
+      isLecturerProfileUnsynced = true;
+    }
+    
+    await _saveData(); // Save the new value of isLecturerProfileUnsynced
+    notifyListeners();
+    return success;
   }
 
   void _initMockSession() {
@@ -524,6 +542,28 @@ class AttendanceProvider with ChangeNotifier {
     return null;
   }
 
+  Future<bool> _trySyncLecturerProfileToXampp(Lecturer profile) async {
+    try {
+      final response = await http.post(
+        Uri.parse('http://$serverIp/tap_attend/api/update_lecturer.php'),
+        body: {
+          'lecturer_id': profile.id,
+          'name': profile.name,
+          'email': profile.email,
+          'department': profile.department,
+          'office': profile.office,
+          'phone': profile.phone,
+        },
+      ).timeout(const Duration(seconds: 4));
+
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body);
+        return data['success'] == true;
+      }
+    } catch (_) {}
+    return false;
+  }
+
   Future<bool> _trySyncStudentToXampp(String id, String name, String cardUid, String subjectCode) async {
     try {
       final response = await http.post(
@@ -598,6 +638,14 @@ class AttendanceProvider with ChangeNotifier {
         if (success) {
           unsyncedSessionIds.remove(sessionId);
         }
+      }
+    }
+
+    // 4. Sync pending lecturer profile edits
+    if (isLecturerProfileUnsynced && lecturer != null) {
+      bool success = await _trySyncLecturerProfileToXampp(lecturer!);
+      if (success) {
+        isLecturerProfileUnsynced = false;
       }
     }
 

@@ -5,6 +5,7 @@ import 'package:tap_attend/providers/attendance_provider.dart';
 import 'package:tap_attend/utils/date_parser.dart';
 import 'package:tap_attend/models/student.dart';
 import 'package:tap_attend/models/class_session.dart';
+import 'package:tap_attend/models/lecturer.dart';
 
 void main() {
   group('DateParser.parseTimezoneIndependent', () {
@@ -109,6 +110,25 @@ void main() {
       expect(session.id, equals('past_CS101_20260605'));
       expect(session.totalEnrolled, equals(3));
       expect(session.previousAverageScore, equals(85));
+    });
+
+    test('Lecturer.fromJson and toJson should serialize id properly', () {
+      final json = {
+        'lecturer_id': 'sharvin',
+        'name': 'Mr. Sharvin Ganeson',
+        'department': 'Dept. of Computer Science',
+        'email': 'sharvin.ganeson@university.edu',
+        'phone': '+1 (555) 123-4567',
+        'office': 'Engineering Bldg, Room 402'
+      };
+
+      final lecturer = Lecturer.fromJson(json);
+      expect(lecturer.id, equals('sharvin'));
+      expect(lecturer.name, equals('Mr. Sharvin Ganeson'));
+
+      final serialized = lecturer.toJson();
+      expect(serialized['id'], equals('sharvin'));
+      expect(serialized['name'], equals('Mr. Sharvin Ganeson'));
     });
   });
 

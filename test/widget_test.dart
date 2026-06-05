@@ -13,6 +13,7 @@ void main() {
       'cachedLecturerId': 'sharvin',
       'cachedPassword': 'Secret123',
       'lecturer': jsonEncode({
+        'id': 'sharvin',
         'name': 'Mr. Sharvin Ganeson',
         'department': 'Dept. of Computer Science',
         'email': 'sharvin.ganeson@university.edu',
