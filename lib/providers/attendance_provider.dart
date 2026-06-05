@@ -30,6 +30,7 @@ class AttendanceProvider with ChangeNotifier {
   List<String> unsyncedSessionIds = []; // Queue for offline finished session IDs
   List<String> deletedStudentIds = []; // Local deleted student IDs
   bool isServerOnline = true; // Simulated connection state (User can toggle in Sync Screen)
+  String? activeLateSessionId; // If set, NFC scans record late attendance for this past session instead of currentSession
 
   AttendanceProvider() {
     _loadData();
@@ -546,6 +547,15 @@ class AttendanceProvider with ChangeNotifier {
   }
 
   void handleScannedTag(String deviceId) {
+    if (activeLateSessionId != null) {
+      final msg = handleScannedTagForPastSession(activeLateSessionId!, deviceId);
+      if (msg != null) {
+        scanMessage = msg;
+        notifyListeners();
+      }
+      return;
+    }
+
     if (currentSession == null) return;
 
     final matchIdx = currentSession!.students.indexWhere(
@@ -584,6 +594,133 @@ class AttendanceProvider with ChangeNotifier {
       scanMessage = "Successfully recorded ${student.name}";
       _saveData();
     }
+    notifyListeners();
+  }
+
+  // --- Late Attendance / Past Session Operations ---
+
+  // Retrieves an existing past session on a given date, or creates a retrospective one
+  ClassSession getOrCreatePastSession(String subjectCode, DateTime date) {
+    final existingIdx = pastSessions.indexWhere((s) => 
+      s.subjectCode == subjectCode &&
+      s.startTime.year == date.year &&
+      s.startTime.month == date.month &&
+      s.startTime.day == date.day
+    );
+    
+    if (existingIdx != -1) {
+      return pastSessions[existingIdx];
+    }
+    
+    final defaultList = getDefaultStudents(subjectCode);
+    final customList = customStudents.where((s) => customStudentSubjectCodes[s.id] == subjectCode).toList();
+    final combined = [...defaultList, ...customList];
+    final roster = combined.where((s) => !deletedStudentIds.contains(s.id)).toList();
+    
+    DateTime startTime;
+    DateTime endTime;
+    String room;
+    String subjectName;
+    
+    if (subjectCode == 'CS202') {
+      subjectName = 'Advanced Algorithms';
+      room = 'Hall A, Main Building';
+      startTime = DateTime(date.year, date.month, date.day, 13, 30);
+      endTime = DateTime(date.year, date.month, date.day, 15, 0);
+    } else if (subjectCode == 'CS303') {
+      subjectName = 'Data Structures';
+      room = 'Lab 1, Engineering Building';
+      startTime = DateTime(date.year, date.month, date.day, 15, 15);
+      endTime = DateTime(date.year, date.month, date.day, 16, 45);
+    } else {
+      subjectName = 'Computer Science 101';
+      room = 'Lab 3, Engineering Building';
+      startTime = DateTime(date.year, date.month, date.day, 10, 0);
+      endTime = DateTime(date.year, date.month, date.day, 11, 30);
+    }
+    
+    final newSessionId = 'past_${subjectCode}_${date.year}${date.month.toString().padLeft(2, '0')}${date.day.toString().padLeft(2, '0')}';
+    
+    final newSession = ClassSession(
+      id: newSessionId,
+      subjectCode: subjectCode,
+      subjectName: subjectName,
+      room: room,
+      startTime: startTime,
+      endTime: endTime,
+      totalEnrolled: roster.length,
+      previousAverageScore: 85,
+      students: roster,
+      scannedStudents: [],
+    );
+    
+    pastSessions.add(newSession);
+    _saveData();
+    notifyListeners();
+    return newSession;
+  }
+
+  // Marks a student present in a past session retrospectively
+  Future<void> markStudentPresentInPastSession(String sessionId, String studentId) async {
+    final idx = pastSessions.indexWhere((s) => s.id == sessionId);
+    if (idx != -1) {
+      final session = pastSessions[idx];
+      if (session.scannedStudents.any((s) => s.id == studentId)) {
+        return;
+      }
+      final studentIdx = session.students.indexWhere((s) => s.id == studentId);
+      if (studentIdx != -1) {
+        final student = session.students[studentIdx];
+        final verifiedStudent = student.copyWith(scanTime: DateTime.now());
+        final updatedScanned = List<Student>.from(session.scannedStudents)..insert(0, verifiedStudent);
+        final updatedSession = session.copyWith(scannedStudents: updatedScanned);
+        pastSessions[idx] = updatedSession;
+        
+        bool synced = await _trySyncSessionToXampp(updatedSession);
+        if (!synced) {
+          if (!unsyncedSessionIds.contains(sessionId)) {
+            unsyncedSessionIds.add(sessionId);
+          }
+        }
+        await _saveData();
+        notifyListeners();
+      }
+    }
+  }
+
+  // Handles scanned NFC tag for a past session late recording
+  String? handleScannedTagForPastSession(String sessionId, String deviceId) {
+    final idx = pastSessions.indexWhere((s) => s.id == sessionId);
+    if (idx == -1) return "Session not found";
+    
+    final session = pastSessions[idx];
+    final studentIdx = session.students.indexWhere((s) => s.deviceId == deviceId);
+    if (studentIdx == -1) {
+      return "Card not registered\nto this class";
+    }
+    
+    final student = session.students[studentIdx];
+    if (session.scannedStudents.any((s) => s.id == student.id)) {
+      return "${student.name}\nis already present";
+    }
+    
+    final verifiedStudent = student.copyWith(scanTime: DateTime.now());
+    final updatedScanned = List<Student>.from(session.scannedStudents)..insert(0, verifiedStudent);
+    final updatedSession = session.copyWith(scannedStudents: updatedScanned);
+    pastSessions[idx] = updatedSession;
+    
+    _syncPastSessionUpdate(updatedSession);
+    return "Successfully recorded\n${student.name}";
+  }
+  
+  Future<void> _syncPastSessionUpdate(ClassSession updatedSession) async {
+    bool synced = await _trySyncSessionToXampp(updatedSession);
+    if (!synced) {
+      if (!unsyncedSessionIds.contains(updatedSession.id)) {
+        unsyncedSessionIds.add(updatedSession.id);
+      }
+    }
+    await _saveData();
     notifyListeners();
   }
 }
