@@ -13,8 +13,16 @@ class DashboardScreen extends StatefulWidget {
 }
 
 class _DashboardScreenState extends State<DashboardScreen> {
-  DateTime _selectedDate = DateTime(2023, 10, 23); // Simulated "today" date
-  final DateTime _mockToday = DateTime(2023, 10, 23);
+  late DateTime _selectedDate;
+  late final DateTime _mockToday;
+
+  @override
+  void initState() {
+    super.initState();
+    final now = DateTime.now();
+    _mockToday = DateTime(now.year, now.month, now.day);
+    _selectedDate = _mockToday;
+  }
 
   String _formatDisplayDate(DateTime date) {
     final weekdays = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
@@ -60,7 +68,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
         ),
       );
     } else {
-      // Today (Oct 23, 2023): Active recording flow
+      // Today: Active recording flow
       provider.loadSessionByCode(subjectCode);
       Navigator.push(
         context,
