@@ -1009,6 +1009,9 @@ class AttendanceProvider with ChangeNotifier {
             cachedLecturerId = idClean;
             cachedPassword = pwdClean;
             await _saveData();
+            // Store the lecturer profile in a persistent cache so it's not lost on sign out
+            final prefs = await SharedPreferences.getInstance();
+            await prefs.setString('cachedLecturer', jsonEncode(lecturer!.toJson()));
             notifyListeners();
             return true;
           }
@@ -1023,7 +1026,7 @@ class AttendanceProvider with ChangeNotifier {
       if (idClean == cachedLecturerId && pwdClean == cachedPassword) {
         if (lecturer == null) {
           final prefs = await SharedPreferences.getInstance();
-          final lecturerJson = prefs.getString('lecturer');
+          final lecturerJson = prefs.getString('cachedLecturer') ?? prefs.getString('lecturer');
           if (lecturerJson != null) {
             lecturer = Lecturer.fromJson(jsonDecode(lecturerJson));
           }
@@ -1038,13 +1041,11 @@ class AttendanceProvider with ChangeNotifier {
 
   Future<void> signOutLecturer() async {
     lecturer = null;
-    cachedLecturerId = null;
-    cachedPassword = null;
+    // We do NOT clear cachedLecturerId, cachedPassword, or cachedLecturer,
+    // so they remain available for offline login even after signing out.
     
     final prefs = await SharedPreferences.getInstance();
     await prefs.remove('lecturer');
-    await prefs.remove('cachedLecturerId');
-    await prefs.remove('cachedPassword');
     
     notifyListeners();
   }

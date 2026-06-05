@@ -1,4 +1,7 @@
+import 'dart:convert';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import 'package:tap_attend/providers/attendance_provider.dart';
 import 'package:tap_attend/utils/date_parser.dart';
 import 'package:tap_attend/models/student.dart';
 import 'package:tap_attend/models/class_session.dart';
@@ -106,6 +109,50 @@ void main() {
       expect(session.id, equals('past_CS101_20260605'));
       expect(session.totalEnrolled, equals(3));
       expect(session.previousAverageScore, equals(85));
+    });
+  });
+
+  group('Lecturer Authentication Cache Tests', () {
+    test('signOutLecturer should clear active session but preserve cached credentials', () async {
+      SharedPreferences.setMockInitialValues({
+        'cachedLecturerId': 'sharvin',
+        'cachedPassword': 'Secret123',
+        'cachedLecturer': jsonEncode({
+          'name': 'Mr. Sharvin Ganeson',
+          'department': 'Dept. of Computer Science',
+          'email': 'sharvin.ganeson@university.edu',
+          'phone': '+1 (555) 123-4567',
+          'office': 'Engineering Bldg, Room 402'
+        }),
+        'lecturer': jsonEncode({
+          'name': 'Mr. Sharvin Ganeson',
+          'department': 'Dept. of Computer Science',
+          'email': 'sharvin.ganeson@university.edu',
+          'phone': '+1 (555) 123-4567',
+          'office': 'Engineering Bldg, Room 402'
+        })
+      });
+
+      final provider = AttendanceProvider();
+      await provider.initializationFuture;
+
+      expect(provider.lecturer, isNotNull);
+      expect(provider.lecturer!.name, equals('Mr. Sharvin Ganeson'));
+      expect(provider.cachedLecturerId, equals('sharvin'));
+      expect(provider.cachedPassword, equals('Secret123'));
+
+      await provider.signOutLecturer();
+
+      expect(provider.lecturer, isNull);
+      expect(provider.cachedLecturerId, equals('sharvin'));
+      expect(provider.cachedPassword, equals('Secret123'));
+
+      provider.isServerConnectionActive = false;
+      final loginSuccess = await provider.loginLecturer('sharvin', 'Secret123');
+      expect(loginSuccess, isTrue);
+      
+      expect(provider.lecturer, isNotNull);
+      expect(provider.lecturer!.name, equals('Mr. Sharvin Ganeson'));
     });
   });
 }
