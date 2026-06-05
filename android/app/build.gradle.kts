@@ -7,6 +7,10 @@ plugins {
 
 android {
     namespace = "com.example.tap_attend"
+    // Force the build directory to the root build folder to solve path issues with spaces.
+    // We use rootDir.parent to jump out of the 'android' folder.
+    layout.buildDirectory.set(file("${rootDir.parent}/build/app"))
+    
     compileSdk = flutter.compileSdkVersion
     ndkVersion = flutter.ndkVersion
 

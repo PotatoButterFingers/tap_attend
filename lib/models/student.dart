@@ -28,4 +28,24 @@ class Student {
       isVerified: isVerified ?? this.isVerified,
     );
   }
+
+  Map<String, dynamic> toJson() {
+    return {
+      'id': id,
+      'name': name,
+      'deviceId': deviceId,
+      'scanTime': scanTime?.toIso8601String(),
+      'isVerified': isVerified,
+    };
+  }
+
+  factory Student.fromJson(Map<String, dynamic> json) {
+    return Student(
+      id: json['id'],
+      name: json['name'],
+      deviceId: json['deviceId'],
+      scanTime: json['scanTime'] != null ? DateTime.parse(json['scanTime']) : null,
+      isVerified: json['isVerified'] ?? false,
+    );
+  }
 }

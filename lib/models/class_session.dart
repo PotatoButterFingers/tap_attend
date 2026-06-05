@@ -58,4 +58,34 @@ class ClassSession {
       scannedStudents: scannedStudents ?? this.scannedStudents,
     );
   }
+
+  Map<String, dynamic> toJson() {
+    return {
+      'id': id,
+      'subjectCode': subjectCode,
+      'subjectName': subjectName,
+      'room': room,
+      'startTime': startTime.toIso8601String(),
+      'endTime': endTime.toIso8601String(),
+      'totalEnrolled': totalEnrolled,
+      'previousAverageScore': previousAverageScore,
+      'students': students.map((e) => e.toJson()).toList(),
+      'scannedStudents': scannedStudents.map((e) => e.toJson()).toList(),
+    };
+  }
+
+  factory ClassSession.fromJson(Map<String, dynamic> json) {
+    return ClassSession(
+      id: json['id'],
+      subjectCode: json['subjectCode'],
+      subjectName: json['subjectName'],
+      room: json['room'],
+      startTime: DateTime.parse(json['startTime']),
+      endTime: DateTime.parse(json['endTime']),
+      totalEnrolled: json['totalEnrolled'],
+      previousAverageScore: json['previousAverageScore'],
+      students: (json['students'] as List).map((e) => Student.fromJson(e)).toList(),
+      scannedStudents: (json['scannedStudents'] as List).map((e) => Student.fromJson(e)).toList(),
+    );
+  }
 }

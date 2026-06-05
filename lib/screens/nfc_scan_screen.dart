@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:tap_attend/providers/attendance_provider.dart';
+import 'package:tap_attend/utils/export_utils.dart';
 
 class NfcScanScreen extends StatefulWidget {
   const NfcScanScreen({super.key});
@@ -215,20 +216,99 @@ class _NfcScanScreenState extends State<NfcScanScreen> with SingleTickerProvider
                   ),
                   
                   const SizedBox(height: 16),
-                  SizedBox(
-                    width: double.infinity,
-                    child: ElevatedButton(
-                      onPressed: () {
-                        provider.stopNfcScanning();
-                        Navigator.pop(context); // Go back to session overview or dashboard
-                      },
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: Colors.blue.withValues(alpha: 0.1),
-                        foregroundColor: Colors.blue,
-                        elevation: 0,
+                  Row(
+                    children: [
+                      Expanded(
+                        child: ElevatedButton(
+                          onPressed: () {
+                            provider.stopNfcScanning();
+                            showDialog(
+                              context: context,
+                              builder: (context) => AlertDialog(
+                                title: const Text('End Session?'),
+                                content: const Text('Do you want to export the attendance list before ending?'),
+                                actions: [
+                                  TextButton(
+                                    onPressed: () {
+                                      Navigator.pop(context); // Close dialog
+                                      provider.finishSession();
+                                      Navigator.pop(context); // Close scan screen
+                                    },
+                                    child: const Text('Just End'),
+                                  ),
+                                  ElevatedButton(
+                                    onPressed: () async {
+                                      Navigator.pop(context); // Close dialog
+                                      await ExportUtils.exportSessionToCSV(session);
+                                      provider.finishSession();
+                                      if (context.mounted) {
+                                        Navigator.pop(context); // Close scan screen
+                                      }
+                                    },
+                                    child: const Text('Export & End'),
+                                  ),
+                                ],
+                              ),
+                            );
+                          },
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: Colors.blue.withValues(alpha: 0.1),
+                            foregroundColor: Colors.blue,
+                            elevation: 0,
+                          ),
+                          child: const Text('Finish Session'),
+                        ),
                       ),
-                      child: const Text('Finish Session'),
-                    ),
+                      const SizedBox(width: 16),
+                      TextButton.icon(
+                        onPressed: () {
+                          // Manual Override
+                          showModalBottomSheet(
+                            context: context,
+                            backgroundColor: Theme.of(context).scaffoldBackgroundColor,
+                            shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(24))),
+                            builder: (context) {
+                              final absentStudents = session.students.where(
+                                (s) => !session.scannedStudents.any((scanned) => scanned.id == s.id)
+                              ).toList();
+                              
+                              return Container(
+                                padding: const EdgeInsets.all(24),
+                                child: Column(
+                                  children: [
+                                    Text('Manual Attendance', style: Theme.of(context).textTheme.titleLarge),
+                                    const SizedBox(height: 16),
+                                    Expanded(
+                                      child: absentStudents.isEmpty 
+                                      ? const Center(child: Text("All students present!"))
+                                      : ListView.builder(
+                                        itemCount: absentStudents.length,
+                                        itemBuilder: (context, index) {
+                                          final s = absentStudents[index];
+                                          return ListTile(
+                                            title: Text(s.name),
+                                            trailing: IconButton(
+                                              icon: const Icon(Icons.check_circle_outline, color: Colors.green),
+                                              onPressed: () {
+                                                context.read<AttendanceProvider>().manuallyMarkPresent(s.id);
+                                                Navigator.pop(context); // Close sheet to re-evaluate or keep it open. Let's pop for simplicity.
+                                                ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Manually recorded ${s.name}')));
+                                              },
+                                            ),
+                                          );
+                                        },
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              );
+                            }
+                          );
+                        },
+                        icon: const Icon(Icons.edit),
+                        label: const Text('Manual'),
+                      ),
+                    ],
                   ),
                   const SizedBox(height: 24),
                 ],

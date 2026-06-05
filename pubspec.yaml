@@ -38,6 +38,9 @@ dependencies:
   nfc_manager: ^4.1.1
   shared_preferences: ^2.5.4
   google_fonts: ^8.0.2
+  csv: ^8.0.0
+  path_provider: ^2.1.5
+  share_plus: ^12.0.2
 
 dev_dependencies:
   flutter_test:

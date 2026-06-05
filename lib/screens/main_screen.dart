@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:tap_attend/screens/dashboard_screen.dart';
-// import 'package:tap_attend/screens/nfc_scan_screen.dart'; 
-// We will create this next
+import 'package:tap_attend/screens/attendance_history_screen.dart';
+import 'package:tap_attend/screens/settings_screen.dart';
 
 class MainScreen extends StatefulWidget {
   const MainScreen({super.key});
@@ -15,8 +15,8 @@ class _MainScreenState extends State<MainScreen> {
 
   final List<Widget> _screens = [
     const DashboardScreen(),
-    const Center(child: Text('NFC Scan (To be implemented)')), // const NfcScanScreen(),
-    const Center(child: Text('Settings')),
+    const AttendanceHistoryScreen(),
+    const SettingsScreen(),
   ];
 
   @override
@@ -32,7 +32,7 @@ class _MainScreenState extends State<MainScreen> {
         },
         items: const [
           BottomNavigationBarItem(icon: Icon(Icons.home), label: 'Home'),
-          BottomNavigationBarItem(icon: Icon(Icons.nfc), label: 'NFC Scan'),
+          BottomNavigationBarItem(icon: Icon(Icons.history), label: 'History'),
           BottomNavigationBarItem(icon: Icon(Icons.settings), label: 'Settings'),
         ],
       ),
