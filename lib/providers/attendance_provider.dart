@@ -13,6 +13,7 @@ class AttendanceProvider with ChangeNotifier {
   bool isScanning = false;
   String? scanMessage;
   Student? lastScannedStudent;
+  
   Lecturer? lecturer = Lecturer(
     name: 'Dr. Robert Smith',
     department: 'Dept. of Computer Science',
@@ -20,6 +21,15 @@ class AttendanceProvider with ChangeNotifier {
     phone: '+1 (555) 123-4567',
     office: 'Engineering Bldg, Room 402',
   );
+
+  // Sync Queues and Custom Local Data
+  List<Student> customStudents = [];
+  Map<String, String> customStudentSubjectCodes = {}; // Maps student.id -> subjectCode
+  List<Map<String, dynamic>> pendingRegistrations = []; // Queue for offline registrations: {id, name, cardUid, subjectCode}
+  List<String> pendingDeletions = []; // Queue for offline deletions: studentId
+  List<String> unsyncedSessionIds = []; // Queue for offline finished session IDs
+  List<String> deletedStudentIds = []; // Local deleted student IDs
+  bool isServerOnline = true; // Simulated connection state (User can toggle in Sync Screen)
 
   AttendanceProvider() {
     _loadData();
@@ -49,31 +59,71 @@ class AttendanceProvider with ChangeNotifier {
     } else {
       _initMockSession();
     }
+
+    // Load custom students
+    final customStudentsJson = prefs.getStringList('customStudents');
+    if (customStudentsJson != null) {
+      customStudents = customStudentsJson
+          .map((e) => Student.fromJson(jsonDecode(e)))
+          .toList();
+    }
+
+    // Load custom student subject codes
+    final customStudentSubjectCodesJson = prefs.getString('customStudentSubjectCodes');
+    if (customStudentSubjectCodesJson != null) {
+      customStudentSubjectCodes = Map<String, String>.from(jsonDecode(customStudentSubjectCodesJson));
+    }
+
+    // Load pending queues
+    final pendingRegistrationsJson = prefs.getStringList('pendingRegistrations');
+    if (pendingRegistrationsJson != null) {
+      pendingRegistrations = pendingRegistrationsJson
+          .map((e) => Map<String, dynamic>.from(jsonDecode(e)))
+          .toList();
+    }
+
+    pendingDeletions = prefs.getStringList('pendingDeletions') ?? [];
+    unsyncedSessionIds = prefs.getStringList('unsyncedSessionIds') ?? [];
+    deletedStudentIds = prefs.getStringList('deletedStudentIds') ?? [];
+    isServerOnline = prefs.getBool('isServerOnline') ?? true;
+
     notifyListeners();
   }
 
   Future<void> _saveData() async {
     final prefs = await SharedPreferences.getInstance();
+    
     if (currentSession != null) {
-      await prefs.setString(
-        'currentSession',
-        jsonEncode(currentSession!.toJson()),
-      );
+      await prefs.setString('currentSession', jsonEncode(currentSession!.toJson()));
     } else {
       await prefs.remove('currentSession');
     }
 
     if (lecturer != null) {
-      await prefs.setString(
-        'lecturer',
-        jsonEncode(lecturer!.toJson()),
-      );
+      await prefs.setString('lecturer', jsonEncode(lecturer!.toJson()));
     }
 
     final pastSessionsJson = pastSessions
         .map((e) => jsonEncode(e.toJson()))
         .toList();
     await prefs.setStringList('pastSessions', pastSessionsJson);
+
+    final customStudentsJson = customStudents
+        .map((e) => jsonEncode(e.toJson()))
+        .toList();
+    await prefs.setStringList('customStudents', customStudentsJson);
+
+    await prefs.setString('customStudentSubjectCodes', jsonEncode(customStudentSubjectCodes));
+
+    final pendingRegistrationsJson = pendingRegistrations
+        .map((e) => jsonEncode(e))
+        .toList();
+    await prefs.setStringList('pendingRegistrations', pendingRegistrationsJson);
+
+    await prefs.setStringList('pendingDeletions', pendingDeletions);
+    await prefs.setStringList('unsyncedSessionIds', unsyncedSessionIds);
+    await prefs.setStringList('deletedStudentIds', deletedStudentIds);
+    await prefs.setBool('isServerOnline', isServerOnline);
   }
 
   Future<void> updateLecturer(Lecturer updated) async {
@@ -90,7 +140,61 @@ class AttendanceProvider with ChangeNotifier {
     loadSessionByCode('CS101');
   }
 
+  // Gets the initial hardcoded class roster
+  List<Student> getDefaultStudents(String subjectCode) {
+    if (subjectCode == 'CS101') {
+      return [
+        Student(id: '101', name: 'Benjamin Miller', deviceId: 'tag_1', isVerified: true),
+        Student(id: '102', name: 'Sophia Chen', deviceId: 'tag_2', isVerified: true),
+        Student(id: '103', name: 'Marcus Wright', deviceId: 'tag_3', isVerified: true),
+      ];
+    } else if (subjectCode == 'CS202') {
+      return [
+        Student(id: '201', name: 'Emma Watson', deviceId: 'tag_4', isVerified: true),
+        Student(id: '202', name: 'Liam Neeson', deviceId: 'tag_5', isVerified: true),
+        Student(id: '203', name: 'Olivia Wilde', deviceId: 'tag_6', isVerified: true),
+      ];
+    } else if (subjectCode == 'CS303') {
+      return [
+        Student(id: '301', name: 'Noah Centineo', deviceId: 'tag_7', isVerified: true),
+        Student(id: '302', name: 'Ava DuVernay', deviceId: 'tag_8', isVerified: true),
+        Student(id: '303', name: 'Lucas Hedges', deviceId: 'tag_9', isVerified: true),
+      ];
+    }
+    return [];
+  }
+
+  // Get master list of all unique active students in the directory
+  List<Student> get allStudentsInDirectory {
+    final list = [
+      ...getDefaultStudents('CS101'),
+      ...getDefaultStudents('CS202'),
+      ...getDefaultStudents('CS303'),
+      ...customStudents,
+    ];
+    
+    // Filter out deleted students
+    final filteredList = list.where((s) => !deletedStudentIds.contains(s.id)).toList();
+    
+    // De-duplicate by ID
+    final Map<String, Student> unique = {};
+    for (var s in filteredList) {
+      unique[s.id] = s;
+    }
+    return unique.values.toList();
+  }
+
   void loadSessionByCode(String subjectCode) {
+    // 1. Load default students
+    final defaultList = getDefaultStudents(subjectCode);
+    
+    // 2. Load custom students enrolled in this class
+    final customList = customStudents.where((s) => customStudentSubjectCodes[s.id] == subjectCode).toList();
+
+    // Combine and apply deleted filters
+    final combined = [...defaultList, ...customList];
+    final activeStudents = combined.where((s) => !deletedStudentIds.contains(s.id)).toList();
+
     if (subjectCode == 'CS202') {
       currentSession = ClassSession(
         id: 's2',
@@ -99,28 +203,9 @@ class AttendanceProvider with ChangeNotifier {
         room: 'Hall A, Main Building',
         startTime: DateTime.now().copyWith(hour: 13, minute: 30),
         endTime: DateTime.now().copyWith(hour: 15, minute: 0),
-        totalEnrolled: 32,
+        totalEnrolled: activeStudents.length,
         previousAverageScore: 88,
-        students: [
-          Student(
-            id: '201',
-            name: 'Emma Watson',
-            deviceId: 'tag_4',
-            isVerified: true,
-          ),
-          Student(
-            id: '202',
-            name: 'Liam Neeson',
-            deviceId: 'tag_5',
-            isVerified: true,
-          ),
-          Student(
-            id: '203',
-            name: 'Olivia Wilde',
-            deviceId: 'tag_6',
-            isVerified: true,
-          ),
-        ],
+        students: activeStudents,
         scannedStudents: [],
       );
     } else if (subjectCode == 'CS303') {
@@ -131,28 +216,9 @@ class AttendanceProvider with ChangeNotifier {
         room: 'Lab 1, Engineering Building',
         startTime: DateTime.now().copyWith(hour: 15, minute: 15),
         endTime: DateTime.now().copyWith(hour: 16, minute: 45),
-        totalEnrolled: 45,
+        totalEnrolled: activeStudents.length,
         previousAverageScore: 90,
-        students: [
-          Student(
-            id: '301',
-            name: 'Noah Centineo',
-            deviceId: 'tag_7',
-            isVerified: true,
-          ),
-          Student(
-            id: '302',
-            name: 'Ava DuVernay',
-            deviceId: 'tag_8',
-            isVerified: true,
-          ),
-          Student(
-            id: '303',
-            name: 'Lucas Hedges',
-            deviceId: 'tag_9',
-            isVerified: true,
-          ),
-        ],
+        students: activeStudents,
         scannedStudents: [],
       );
     } else {
@@ -164,28 +230,9 @@ class AttendanceProvider with ChangeNotifier {
         room: 'Lab 3, Engineering Building',
         startTime: DateTime.now().copyWith(hour: 10, minute: 0),
         endTime: DateTime.now().copyWith(hour: 11, minute: 30),
-        totalEnrolled: 48,
+        totalEnrolled: activeStudents.length,
         previousAverageScore: 92,
-        students: [
-          Student(
-            id: '101',
-            name: 'Benjamin Miller',
-            deviceId: 'tag_1',
-            isVerified: true,
-          ),
-          Student(
-            id: '102',
-            name: 'Sophia Chen',
-            deviceId: 'tag_2',
-            isVerified: true,
-          ),
-          Student(
-            id: '103',
-            name: 'Marcus Wright',
-            deviceId: 'tag_3',
-            isVerified: true,
-          ),
-        ],
+        students: activeStudents,
         scannedStudents: [],
       );
     }
@@ -193,14 +240,234 @@ class AttendanceProvider with ChangeNotifier {
     notifyListeners();
   }
 
-  void finishSession() {
+  Future<void> finishSession() async {
     if (currentSession != null) {
-      pastSessions.add(currentSession!);
+      final session = currentSession!;
+      pastSessions.add(session);
       currentSession = null;
-      _saveData();
+
+      // Sync flow: Check server connection
+      bool synced = await _trySyncSessionToXampp(session);
+      if (!synced) {
+        unsyncedSessionIds.add(session.id);
+      }
+
+      await _saveData();
       notifyListeners();
     }
   }
+
+  // --- Student Registration & Deletion Operations ---
+
+  // Checks if a card is already mapped to any student
+  Student? checkCardRegistration(String cardUid) {
+    final students = allStudentsInDirectory;
+    final index = students.indexWhere((s) => s.deviceId == cardUid);
+    if (index != -1) {
+      return students[index];
+    }
+    return null;
+  }
+
+  // Registers a new student and syncs to XAMPP
+  Future<void> registerNewStudent({
+    required String id,
+    required String name,
+    required String cardUid,
+    required String subjectCode,
+  }) async {
+    final newStudent = Student(
+      id: id,
+      name: name,
+      deviceId: cardUid,
+      isVerified: true,
+    );
+
+    // 1. Add locally
+    customStudents.add(newStudent);
+    customStudentSubjectCodes[id] = subjectCode;
+
+    // 2. If active session matches class, append student to active session roster
+    if (currentSession != null && currentSession!.subjectCode == subjectCode) {
+      final updatedList = List<Student>.from(currentSession!.students)..add(newStudent);
+      currentSession = currentSession!.copyWith(
+        scannedStudents: currentSession!.scannedStudents,
+      );
+      // We manually construct ClassSession to update count
+      currentSession = ClassSession(
+        id: currentSession!.id,
+        subjectCode: currentSession!.subjectCode,
+        subjectName: currentSession!.subjectName,
+        room: currentSession!.room,
+        startTime: currentSession!.startTime,
+        endTime: currentSession!.endTime,
+        totalEnrolled: updatedList.length,
+        previousAverageScore: currentSession!.previousAverageScore,
+        students: updatedList,
+        scannedStudents: currentSession!.scannedStudents,
+      );
+    }
+
+    // 3. Sync to XAMPP
+    bool synced = await _trySyncStudentToXampp(id, name, cardUid, subjectCode);
+    if (!synced) {
+      pendingRegistrations.add({
+        'id': id,
+        'name': name,
+        'cardUid': cardUid,
+        'subjectCode': subjectCode,
+      });
+    }
+
+    // Remove from deleted list if they were previously deleted
+    deletedStudentIds.remove(id);
+
+    await _saveData();
+    notifyListeners();
+  }
+
+  // Deletes a student from the directory
+  Future<void> deleteStudent(String studentId) async {
+    deletedStudentIds.add(studentId);
+
+    // Remove from local custom list if present
+    customStudents.removeWhere((s) => s.id == studentId);
+    customStudentSubjectCodes.remove(studentId);
+
+    // If active session has this student, remove them
+    if (currentSession != null) {
+      final updatedList = currentSession!.students.where((s) => s.id != studentId).toList();
+      final updatedScannedList = currentSession!.scannedStudents.where((s) => s.id != studentId).toList();
+      currentSession = ClassSession(
+        id: currentSession!.id,
+        subjectCode: currentSession!.subjectCode,
+        subjectName: currentSession!.subjectName,
+        room: currentSession!.room,
+        startTime: currentSession!.startTime,
+        endTime: currentSession!.endTime,
+        totalEnrolled: updatedList.length,
+        previousAverageScore: currentSession!.previousAverageScore,
+        students: updatedList,
+        scannedStudents: updatedScannedList,
+      );
+    }
+
+    // Sync deletion to XAMPP
+    bool synced = await _trySyncDeleteToXampp(studentId);
+    if (!synced) {
+      pendingDeletions.add(studentId);
+    }
+
+    await _saveData();
+    notifyListeners();
+  }
+
+  // --- XAMPP API Communication & Syncing ---
+
+  void toggleServerOnline(bool status) {
+    isServerOnline = status;
+    _saveData();
+    notifyListeners();
+    if (isServerOnline) {
+      // Auto-trigger sync when connectivity is restored
+      syncAllPendingData();
+    }
+  }
+
+  Future<bool> _trySyncStudentToXampp(String id, String name, String cardUid, String subjectCode) async {
+    if (!isServerOnline) return false;
+    try {
+      // ACTUAL INTEGRATION:
+      // final response = await http.post(
+      //   Uri.parse('http://<xampp_ip>/tap_attend/api/register_student.php'),
+      //   body: {'id': id, 'name': name, 'deviceId': cardUid, 'subjectCode': subjectCode},
+      // ).timeout(const Duration(seconds: 3));
+      // return response.statusCode == 200;
+      await Future.delayed(const Duration(milliseconds: 600));
+      return true;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  Future<bool> _trySyncDeleteToXampp(String studentId) async {
+    if (!isServerOnline) return false;
+    try {
+      // ACTUAL INTEGRATION:
+      // final response = await http.post(
+      //   Uri.parse('http://<xampp_ip>/tap_attend/api/delete_student.php'),
+      //   body: {'id': studentId},
+      // ).timeout(const Duration(seconds: 3));
+      // return response.statusCode == 200;
+      await Future.delayed(const Duration(milliseconds: 600));
+      return true;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  Future<bool> _trySyncSessionToXampp(ClassSession session) async {
+    if (!isServerOnline) return false;
+    try {
+      // ACTUAL INTEGRATION:
+      // final response = await http.post(
+      //   Uri.parse('http://<xampp_ip>/tap_attend/api/submit_attendance.php'),
+      //   headers: {'Content-Type': 'application/json'},
+      //   body: jsonEncode(session.toJson()),
+      // ).timeout(const Duration(seconds: 3));
+      // return response.statusCode == 200;
+      await Future.delayed(const Duration(milliseconds: 800));
+      return true;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  // Tries to upload all queued offline records
+  Future<void> syncAllPendingData() async {
+    if (!isServerOnline) return;
+
+    // 1. Sync pending student registrations
+    final registrationsToSync = List<Map<String, dynamic>>.from(pendingRegistrations);
+    for (var reg in registrationsToSync) {
+      bool success = await _trySyncStudentToXampp(
+        reg['id'],
+        reg['name'],
+        reg['cardUid'],
+        reg['subjectCode'],
+      );
+      if (success) {
+        pendingRegistrations.removeWhere((r) => r['id'] == reg['id']);
+      }
+    }
+
+    // 2. Sync pending student deletions
+    final deletionsToSync = List<String>.from(pendingDeletions);
+    for (var studentId in deletionsToSync) {
+      bool success = await _trySyncDeleteToXampp(studentId);
+      if (success) {
+        pendingDeletions.remove(studentId);
+      }
+    }
+
+    // 3. Sync finished offline sessions
+    final sessionsToSync = List<String>.from(unsyncedSessionIds);
+    for (var sessionId in sessionsToSync) {
+      // Find the session in pastSessions
+      final index = pastSessions.indexWhere((s) => s.id == sessionId);
+      if (index != -1) {
+        bool success = await _trySyncSessionToXampp(pastSessions[index]);
+        if (success) {
+          unsyncedSessionIds.remove(sessionId);
+        }
+      }
+    }
+
+    await _saveData();
+    notifyListeners();
+  }
+
+  // --- NFC Scanning Logic ---
 
   Future<void> startNfcScanning() async {
     isScanning = true;
@@ -215,7 +482,6 @@ class AttendanceProvider with ChangeNotifier {
         scanMessage =
             "NFC is not available on this device.\nSimulating scan instead.";
         notifyListeners();
-        // Emulate a scan on unsupported devices after a delay for testing purposes
         Future.delayed(const Duration(seconds: 3), () {
           if (isScanning) simulateNfcScan('tag_1');
         });

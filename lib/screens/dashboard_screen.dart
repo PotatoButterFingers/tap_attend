@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:tap_attend/providers/attendance_provider.dart';
 import 'package:tap_attend/screens/session_overview_screen.dart';
+import 'package:tap_attend/screens/card_registration_screen.dart';
 
 class DashboardScreen extends StatelessWidget {
   const DashboardScreen({super.key});
@@ -28,6 +29,17 @@ class DashboardScreen extends StatelessWidget {
                   const SizedBox(width: 12),
                   const Text('Academic Portal', style: TextStyle(fontWeight: FontWeight.bold, color: Colors.blue)),
                   const Spacer(),
+                  IconButton(
+                    icon: const Icon(Icons.nfc, color: Colors.blue),
+                    tooltip: 'Card Registration',
+                    onPressed: () {
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(builder: (_) => const CardRegistrationScreen()),
+                      );
+                    },
+                  ),
+                  const SizedBox(width: 8),
                   IconButton(icon: const Icon(Icons.calendar_month), onPressed: () {}),
                 ],
               ),

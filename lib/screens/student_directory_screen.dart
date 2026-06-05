@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:tap_attend/models/student.dart';
 import 'package:tap_attend/providers/attendance_provider.dart';
+import 'package:tap_attend/screens/card_registration_screen.dart';
 
 class StudentDirectoryScreen extends StatefulWidget {
   const StudentDirectoryScreen({super.key});
@@ -17,23 +18,13 @@ class _StudentDirectoryScreenState extends State<StudentDirectoryScreen> {
   Widget build(BuildContext context) {
     final provider = Provider.of<AttendanceProvider>(context);
     
-    // Gather unique students across all sessions for a comprehensive list
-    final Map<String, Student> uniqueStudents = {};
-    if (provider.currentSession != null) {
-      for (var s in provider.currentSession!.students) {
-        uniqueStudents[s.id] = s;
-      }
-    }
-    for (var session in provider.pastSessions) {
-      for (var s in session.students) {
-        uniqueStudents[s.id] = s;
-      }
-    }
-    
-    List<Student> displayStudents = uniqueStudents.values.toList();
+    // Get master students list directly from the provider
+    List<Student> displayStudents = provider.allStudentsInDirectory;
     
     if (_searchQuery.isNotEmpty) {
-      displayStudents = displayStudents.where((s) => s.name.toLowerCase().contains(_searchQuery.toLowerCase())).toList();
+      displayStudents = displayStudents
+          .where((s) => s.name.toLowerCase().contains(_searchQuery.toLowerCase()))
+          .toList();
     }
     
     // Sort alphabetically
@@ -69,27 +60,77 @@ class _StudentDirectoryScreenState extends State<StudentDirectoryScreen> {
             ),
             Expanded(
               child: displayStudents.isEmpty
-                ? const Center(child: Text('No students found.'))
-                : ListView.builder(
-                    itemCount: displayStudents.length,
-                    itemBuilder: (context, index) {
-                      final student = displayStudents[index];
-                      return ListTile(
-                        leading: CircleAvatar(
-                          backgroundColor: Colors.blue.withValues(alpha: 0.1),
-                          child: Text(
-                            student.name.substring(0, 1),
-                            style: const TextStyle(color: Colors.blue, fontWeight: FontWeight.bold),
+                  ? const Center(child: Text('No students found.'))
+                  : ListView.builder(
+                      itemCount: displayStudents.length,
+                      itemBuilder: (context, index) {
+                        final student = displayStudents[index];
+                        return ListTile(
+                          leading: CircleAvatar(
+                            backgroundColor: Colors.blue.withValues(alpha: 0.1),
+                            child: Text(
+                              student.name.isNotEmpty ? student.name.substring(0, 1) : 'S',
+                              style: const TextStyle(color: Colors.blue, fontWeight: FontWeight.bold),
+                            ),
                           ),
-                        ),
-                        title: Text(student.name, style: const TextStyle(fontWeight: FontWeight.bold)),
-                        subtitle: Text('ID: ${student.id} | NFC Tag: ${student.deviceId}'),
-                      );
-                    },
-                  ),
+                          title: Text(student.name, style: const TextStyle(fontWeight: FontWeight.bold)),
+                          subtitle: Text('ID: ${student.id} | NFC Tag: ${student.deviceId}'),
+                          trailing: IconButton(
+                            icon: const Icon(Icons.delete_outline, color: Colors.red),
+                            tooltip: 'Delete Student',
+                            onPressed: () {
+                              showDialog(
+                                context: context,
+                                builder: (context) => AlertDialog(
+                                  title: const Text('Delete Student?'),
+                                  content: Text('Are you sure you want to delete ${student.name} from the directory? This will remove them from all classes.'),
+                                  actions: [
+                                    TextButton(
+                                      onPressed: () => Navigator.pop(context),
+                                      child: const Text('Cancel'),
+                                    ),
+                                    ElevatedButton(
+                                      onPressed: () {
+                                        provider.deleteStudent(student.id);
+                                        Navigator.pop(context);
+                                        ScaffoldMessenger.of(context).showSnackBar(
+                                          SnackBar(
+                                            content: Text(
+                                              provider.isServerOnline
+                                                  ? 'Deleted ${student.name} and synced to server'
+                                                  : 'Deleted locally. Will sync when online.',
+                                            ),
+                                            backgroundColor: Colors.red,
+                                          ),
+                                        );
+                                      },
+                                      style: ElevatedButton.styleFrom(
+                                        backgroundColor: Colors.red,
+                                        foregroundColor: Colors.white,
+                                      ),
+                                      child: const Text('Delete'),
+                                    ),
+                                  ],
+                                ),
+                              );
+                            },
+                          ),
+                        );
+                      },
+                    ),
             ),
           ],
         ),
+      ),
+      floatingActionButton: FloatingActionButton(
+        onPressed: () {
+          Navigator.push(
+            context,
+            MaterialPageRoute(builder: (_) => const CardRegistrationScreen()),
+          );
+        },
+        tooltip: 'Scan & Register Card',
+        child: const Icon(Icons.nfc),
       ),
     );
   }
