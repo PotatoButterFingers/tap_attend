@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:tap_attend/providers/attendance_provider.dart';
+import 'package:tap_attend/screens/session_detail_screen.dart';
 
 class AttendanceHistoryScreen extends StatelessWidget {
   const AttendanceHistoryScreen({super.key});
@@ -43,12 +44,11 @@ class AttendanceHistoryScreen extends StatelessWidget {
 
                   return GestureDetector(
                     onTap: () {
-                      // We can push to a Session Detail view.
-                      // For now, let's reuse SessionOverviewScreen but pass past session data?
-                      // Wait, SessionOverview is bound to provider.currentSession.
-                      // I need to show details later, or just show a snackbar for now.
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        SnackBar(content: Text('Viewing ${session.subjectCode} is under construction.')),
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (_) => SessionDetailScreen(session: session),
+                        ),
                       );
                     },
                     child: Container(

@@ -4,6 +4,7 @@ import 'package:nfc_manager/nfc_manager.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:tap_attend/models/class_session.dart';
 import 'package:tap_attend/models/student.dart';
+import 'package:tap_attend/models/lecturer.dart';
 
 class AttendanceProvider with ChangeNotifier {
   // Mock Data
@@ -12,6 +13,13 @@ class AttendanceProvider with ChangeNotifier {
   bool isScanning = false;
   String? scanMessage;
   Student? lastScannedStudent;
+  Lecturer? lecturer = Lecturer(
+    name: 'Dr. Robert Smith',
+    department: 'Dept. of Computer Science',
+    email: 'robert.smith@university.edu',
+    phone: '+1 (555) 123-4567',
+    office: 'Engineering Bldg, Room 402',
+  );
 
   AttendanceProvider() {
     _loadData();
@@ -19,6 +27,12 @@ class AttendanceProvider with ChangeNotifier {
 
   Future<void> _loadData() async {
     final prefs = await SharedPreferences.getInstance();
+
+    // Load lecturer profile
+    final lecturerJson = prefs.getString('lecturer');
+    if (lecturerJson != null) {
+      lecturer = Lecturer.fromJson(jsonDecode(lecturerJson));
+    }
 
     // Load past sessions
     final pastSessionsJson = prefs.getStringList('pastSessions');
@@ -49,10 +63,23 @@ class AttendanceProvider with ChangeNotifier {
       await prefs.remove('currentSession');
     }
 
+    if (lecturer != null) {
+      await prefs.setString(
+        'lecturer',
+        jsonEncode(lecturer!.toJson()),
+      );
+    }
+
     final pastSessionsJson = pastSessions
         .map((e) => jsonEncode(e.toJson()))
         .toList();
     await prefs.setStringList('pastSessions', pastSessionsJson);
+  }
+
+  Future<void> updateLecturer(Lecturer updated) async {
+    lecturer = updated;
+    await _saveData();
+    notifyListeners();
   }
 
   void _initMockSession() {

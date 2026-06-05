@@ -8,6 +8,8 @@ class DashboardScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final lecturerName = context.watch<AttendanceProvider>().lecturer?.name ?? 'Lecturer';
+
     return Scaffold(
       body: SafeArea(
         child: SingleChildScrollView(
@@ -37,7 +39,7 @@ class DashboardScreen extends StatelessWidget {
                   style: Theme.of(context).textTheme.displayLarge?.copyWith(fontSize: 28),
                   children: [
                     const TextSpan(text: 'Good Morning, '),
-                    TextSpan(text: 'Dr. Smith', style: TextStyle(color: Theme.of(context).primaryColor)),
+                    TextSpan(text: lecturerName, style: TextStyle(color: Theme.of(context).primaryColor)),
                   ],
                 ),
               ),
