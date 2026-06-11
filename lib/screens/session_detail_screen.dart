@@ -26,7 +26,9 @@ class _SessionDetailScreenState extends State<SessionDetailScreen> {
           children: [
             Icon(Icons.warning_amber_rounded, color: Colors.red),
             SizedBox(width: 8),
-            Text('Clear All Attendance?'),
+            Expanded(
+              child: Text('Clear All Attendance?'),
+            ),
           ],
         ),
         content: const Text(
@@ -67,7 +69,9 @@ class _SessionDetailScreenState extends State<SessionDetailScreen> {
           children: [
             Icon(Icons.person_remove_outlined, color: Colors.orange),
             SizedBox(width: 8),
-            Text('Remove Attendance?'),
+            Expanded(
+              child: Text('Remove Attendance?'),
+            ),
           ],
         ),
         content: Text(

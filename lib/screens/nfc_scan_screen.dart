@@ -227,6 +227,9 @@ class _NfcScanScreenState extends State<NfcScanScreen> with SingleTickerProvider
                               builder: (context) => AlertDialog(
                                 title: const Text('End Session?'),
                                 content: const Text('Do you want to export the attendance list before ending?'),
+                                actionsOverflowDirection: VerticalDirection.down,
+                                actionsOverflowButtonSpacing: 8,
+                                actionsPadding: const EdgeInsets.only(left: 16, right: 16, bottom: 16),
                                 actions: [
                                   TextButton(
                                     onPressed: () {
@@ -245,6 +248,12 @@ class _NfcScanScreenState extends State<NfcScanScreen> with SingleTickerProvider
                                         Navigator.pop(context); // Close scan screen
                                       }
                                     },
+                                    style: ElevatedButton.styleFrom(
+                                      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+                                      shape: RoundedRectangleBorder(
+                                        borderRadius: BorderRadius.circular(10),
+                                      ),
+                                    ),
                                     child: const Text('Export & End'),
                                   ),
                                 ],

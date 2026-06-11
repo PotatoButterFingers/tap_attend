@@ -1,7 +1,8 @@
 import 'dart:convert';
 import 'dart:io';
+import 'dart:async';
 import 'package:flutter/material.dart';
-import 'package:nfc_manager/nfc_manager.dart';
+import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:http/http.dart' as http;
 import 'package:tap_attend/models/class_session.dart';
@@ -19,6 +20,7 @@ class AttendanceProvider with ChangeNotifier {
   Lecturer? lecturer;
   String? cachedLecturerId;
   String? cachedPassword;
+  String? nfcLoginCardUid;
 
   // Sync Queues and Custom Local Data
   List<Student> customStudents = [];
@@ -27,10 +29,18 @@ class AttendanceProvider with ChangeNotifier {
   List<String> pendingDeletions = []; // Queue for offline deletions: studentId
   List<String> unsyncedSessionIds = []; // Queue for offline finished session IDs
   List<String> deletedStudentIds = []; // Local deleted student IDs
+  List<String> deletedSessionIds = []; // Local deleted session IDs
+  List<ClassSession> deletedSessionsCache = []; // Offline cache for deleted sessions
   bool isServerConnectionActive = false; // Actual connection state
   bool isLecturerProfileUnsynced = false; // True if lecturer edits were made offline and need sync
   String? activeLateSessionId; // If set, NFC scans record late attendance for this past session instead of currentSession
   String serverIp = '10.0.2.2'; // Use 10.0.2.2 for Android emulator gateway, localhost for iOS, or computer's local IP (e.g. 192.168.x.x) for physical phones
+  String? trustedServerToken;
+  String? trustedServerName;
+
+  static const MethodChannel _nfcChannel = MethodChannel('com.example.tap_attend/nfc');
+  static const EventChannel _nfcEventChannel = EventChannel('com.example.tap_attend/nfc_events');
+  StreamSubscription? _nfcSubscription;
 
   Future<void>? initializationFuture;
 
@@ -42,9 +52,12 @@ class AttendanceProvider with ChangeNotifier {
     final prefs = await SharedPreferences.getInstance();
 
     serverIp = prefs.getString('serverIp') ?? '10.0.2.2';
+    trustedServerToken = prefs.getString('trustedServerToken');
+    trustedServerName = prefs.getString('trustedServerName');
 
     cachedLecturerId = prefs.getString('cachedLecturerId');
     cachedPassword = prefs.getString('cachedPassword');
+    nfcLoginCardUid = prefs.getString('nfcLoginCardUid');
 
     // Load lecturer profile
     final lecturerJson = prefs.getString('lecturer');
@@ -56,11 +69,25 @@ class AttendanceProvider with ChangeNotifier {
       lecturer = parsedLecturer;
     }
 
+    // Load deleted session IDs first to use them for filtering
+    deletedSessionIds = prefs.getStringList('deletedSessionIds') ?? [];
+
+    // Load deleted sessions cache
+    final deletedSessionsJson = prefs.getStringList('deletedSessionsCache');
+    if (deletedSessionsJson != null) {
+      deletedSessionsCache = deletedSessionsJson
+          .map((e) => ClassSession.fromJson(jsonDecode(e)))
+          .toList();
+    } else {
+      deletedSessionsCache = [];
+    }
+
     // Load past sessions
     final pastSessionsJson = prefs.getStringList('pastSessions');
     if (pastSessionsJson != null) {
       pastSessions = pastSessionsJson
           .map((e) => ClassSession.fromJson(jsonDecode(e)))
+          .where((s) => !deletedSessionIds.contains(s.id))
           .toList();
     }
 
@@ -132,6 +159,16 @@ class AttendanceProvider with ChangeNotifier {
     final prefs = await SharedPreferences.getInstance();
     
     await prefs.setString('serverIp', serverIp);
+    if (trustedServerToken != null) {
+      await prefs.setString('trustedServerToken', trustedServerToken!);
+    } else {
+      await prefs.remove('trustedServerToken');
+    }
+    if (trustedServerName != null) {
+      await prefs.setString('trustedServerName', trustedServerName!);
+    } else {
+      await prefs.remove('trustedServerName');
+    }
 
     if (currentSession != null) {
       await prefs.setString('currentSession', jsonEncode(currentSession!.toJson()));
@@ -157,10 +194,21 @@ class AttendanceProvider with ChangeNotifier {
       await prefs.remove('cachedPassword');
     }
 
+    if (nfcLoginCardUid != null) {
+      await prefs.setString('nfcLoginCardUid', nfcLoginCardUid!);
+    } else {
+      await prefs.remove('nfcLoginCardUid');
+    }
+
     final pastSessionsJson = pastSessions
         .map((e) => jsonEncode(e.toJson()))
         .toList();
     await prefs.setStringList('pastSessions', pastSessionsJson);
+
+    final deletedSessionsJson = deletedSessionsCache
+        .map((e) => jsonEncode(e.toJson()))
+        .toList();
+    await prefs.setStringList('deletedSessionsCache', deletedSessionsJson);
 
     final customStudentsJson = customStudents
         .map((e) => jsonEncode(e.toJson()))
@@ -177,26 +225,69 @@ class AttendanceProvider with ChangeNotifier {
     await prefs.setStringList('pendingDeletions', pendingDeletions);
     await prefs.setStringList('unsyncedSessionIds', unsyncedSessionIds);
     await prefs.setStringList('deletedStudentIds', deletedStudentIds);
+    await prefs.setStringList('deletedSessionIds', deletedSessionIds);
     await prefs.setBool('isLecturerProfileUnsynced', isLecturerProfileUnsynced);
+  }
+
+  Future<DiscoveredServer?> checkHandshake(String ip) async {
+    try {
+      final response = await http
+          .get(Uri.parse('http://$ip/tap_attend/api/handshake.php'))
+          .timeout(const Duration(seconds: 2));
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body);
+        if (data['success'] == true && data['app'] == 'tap_attend') {
+          return DiscoveredServer(
+            ip: ip,
+            name: data['server_name'] ?? 'Tap Attend Server',
+            token: data['server_token'] ?? '',
+          );
+        }
+      }
+    } catch (_) {}
+    return null;
+  }
+
+  Future<void> setTrustedServer(DiscoveredServer server) async {
+    trustedServerToken = server.token;
+    trustedServerName = server.name;
+    serverIp = server.ip;
+    await _saveData();
+    notifyListeners();
+    await checkServerConnection();
   }
 
   Future<void> updateServerIp(String ip) async {
     serverIp = ip;
     await _saveData();
     notifyListeners();
+    
+    final info = await checkHandshake(ip);
+    if (info != null) {
+      trustedServerToken = info.token;
+      trustedServerName = info.name;
+      await _saveData();
+    }
+    
     await checkServerConnection();
   }
 
   Future<bool> updateLecturer(Lecturer updated) async {
-    lecturer = updated;
+    final cleanedLecturer = updated.copyWith(
+      cardUid: updated.cardUid != null ? _normalizeUid(updated.cardUid!) : null,
+    );
+    lecturer = cleanedLecturer;
+    if (cleanedLecturer.cardUid != null) {
+      nfcLoginCardUid = cleanedLecturer.cardUid;
+    }
     await _saveData();
     // Update cachedLecturer in SharedPreferences so offline login has the updated profile
     final prefs = await SharedPreferences.getInstance();
-    await prefs.setString('cachedLecturer', jsonEncode(updated.toJson()));
+    await prefs.setString('cachedLecturer', jsonEncode(cleanedLecturer.toJson()));
     notifyListeners();
 
     // Try to sync with server
-    bool success = await _trySyncLecturerProfileToXampp(updated);
+    bool success = await _trySyncLecturerProfileToXampp(cleanedLecturer);
     if (success) {
       isLecturerProfileUnsynced = false;
     } else {
@@ -235,9 +326,12 @@ class AttendanceProvider with ChangeNotifier {
         .where((s) => customStudentSubjectCodes[s.id] == subjectCode && !deletedStudentIds.contains(s.id))
         .toList();
 
+    final uniqueId = '${subjectCode == 'CS202' ? 's2' : subjectCode == 'CS303' ? 's3' : 's1'}_${DateTime.now().millisecondsSinceEpoch}';
+    deletedSessionIds.remove(uniqueId);
+
     if (subjectCode == 'CS202') {
       currentSession = ClassSession(
-        id: 's2',
+        id: uniqueId,
         subjectCode: 'CS202',
         subjectName: 'Advanced Algorithms',
         room: 'Hall A, Main Building',
@@ -250,7 +344,7 @@ class AttendanceProvider with ChangeNotifier {
       );
     } else if (subjectCode == 'CS303') {
       currentSession = ClassSession(
-        id: 's3',
+        id: uniqueId,
         subjectCode: 'CS303',
         subjectName: 'Data Structures',
         room: 'Lab 1, Engineering Building',
@@ -264,7 +358,7 @@ class AttendanceProvider with ChangeNotifier {
     } else {
       // Default to CS101 (Computer Science 101)
       currentSession = ClassSession(
-        id: 's1',
+        id: uniqueId,
         subjectCode: 'CS101',
         subjectName: 'Computer Science 101',
         room: 'Lab 3, Engineering Building',
@@ -282,6 +376,7 @@ class AttendanceProvider with ChangeNotifier {
 
   void loadSession(ClassSession session) {
     currentSession = session;
+    deletedSessionIds.remove(session.id);
     _saveData();
     notifyListeners();
   }
@@ -289,7 +384,12 @@ class AttendanceProvider with ChangeNotifier {
   Future<void> finishSession() async {
     if (currentSession != null) {
       final session = currentSession!;
-      pastSessions.add(session);
+      final existingIdx = pastSessions.indexWhere((s) => s.id == session.id);
+      if (existingIdx != -1) {
+        pastSessions[existingIdx] = session;
+      } else {
+        pastSessions.add(session);
+      }
       currentSession = null;
 
       // Sync flow: Check server connection
@@ -305,10 +405,15 @@ class AttendanceProvider with ChangeNotifier {
 
   // --- Student Registration & Deletion Operations ---
 
+  String _normalizeUid(String uid) {
+    return uid.trim().replaceAll(':', '').replaceAll(' ', '').replaceAll('-', '').toUpperCase();
+  }
+
   // Checks if a card is already mapped to any student
   Student? checkCardRegistration(String cardUid) {
     final students = allStudentsInDirectory;
-    final index = students.indexWhere((s) => s.deviceId == cardUid);
+    final normalized = _normalizeUid(cardUid);
+    final index = students.indexWhere((s) => _normalizeUid(s.deviceId) == normalized);
     if (index != -1) {
       return students[index];
     }
@@ -322,10 +427,11 @@ class AttendanceProvider with ChangeNotifier {
     required String cardUid,
     required String subjectCode,
   }) async {
+    final cleanedCardUid = _normalizeUid(cardUid);
     final newStudent = Student(
       id: id,
       name: name,
-      deviceId: cardUid,
+      deviceId: cleanedCardUid,
       isVerified: true,
     );
 
@@ -355,12 +461,12 @@ class AttendanceProvider with ChangeNotifier {
     }
 
     // 3. Sync to XAMPP
-    bool synced = await _trySyncStudentToXampp(id, name, cardUid, subjectCode);
+    bool synced = await _trySyncStudentToXampp(id, name, cleanedCardUid, subjectCode);
     if (!synced) {
       pendingRegistrations.add({
         'id': id,
         'name': name,
-        'cardUid': cardUid,
+        'cardUid': cleanedCardUid,
         'subjectCode': subjectCode,
       });
     }
@@ -470,9 +576,28 @@ class AttendanceProvider with ChangeNotifier {
         final List<dynamic> data = jsonDecode(response.body);
         final List<ClassSession> fetchedSessions = data
             .map((e) => ClassSession.fromJson(e))
+            .where((s) => !deletedSessionIds.contains(s.id))
             .toList();
 
-        pastSessions = fetchedSessions;
+        // Retain local unsynced sessions so they are not wiped out by server fetches
+        final List<ClassSession> unsyncedSessions = pastSessions
+            .where((s) => unsyncedSessionIds.contains(s.id) && !deletedSessionIds.contains(s.id))
+            .toList();
+
+        // Merge fetched sessions and unsynced sessions, avoiding duplicates
+        final mergedSessions = <ClassSession>[];
+        for (var s in fetchedSessions) {
+          if (!mergedSessions.any((existing) => existing.id == s.id)) {
+            mergedSessions.add(s);
+          }
+        }
+        for (var s in unsyncedSessions) {
+          if (!mergedSessions.any((existing) => existing.id == s.id)) {
+            mergedSessions.add(s);
+          }
+        }
+
+        pastSessions = mergedSessions;
         await _saveData();
         notifyListeners();
       } else {
@@ -489,6 +614,30 @@ class AttendanceProvider with ChangeNotifier {
   // Checks the XAMPP server for a session matching the subjectCode and date.
   // If found, merges/saves it to local pastSessions and returns it.
   Future<ClassSession?> checkAndFetchSessionFromServer(String subjectCode, DateTime date) async {
+    // 1. First, check our local deleted sessions cache (handles offline restore!)
+    final localMatchIdx = deletedSessionsCache.lastIndexWhere((s) =>
+        s.subjectCode == subjectCode &&
+        s.startTime.year == date.year &&
+        s.startTime.month == date.month &&
+        s.startTime.day == date.day);
+    
+    if (localMatchIdx != -1) {
+      final match = deletedSessionsCache[localMatchIdx];
+      deletedSessionsCache.removeAt(localMatchIdx);
+      deletedSessionIds.remove(match.id);
+      
+      final existingIdx = pastSessions.indexWhere((s) => s.id == match.id);
+      if (existingIdx != -1) {
+        pastSessions[existingIdx] = match;
+      } else {
+        pastSessions.add(match);
+      }
+      await _saveData();
+      notifyListeners();
+      return match;
+    }
+
+    // 2. If not found in local cache, proceed with server fetch
     try {
       debugPrint("[DateDebug] checkAndFetchSessionFromServer started. Code: $subjectCode, Date: $date, ServerIp: $serverIp");
       final response = await http.get(
@@ -507,20 +656,18 @@ class AttendanceProvider with ChangeNotifier {
           debugPrint("[DateDebug] Fetched: id=${s.id}, code=${s.subjectCode}, startTime=${s.startTime} (Y:${s.startTime.year} M:${s.startTime.month} D:${s.startTime.day})");
         }
         
-        final matchIdx = fetchedSessions.indexWhere(
-          (s) {
-            final matches = s.subjectCode == subjectCode &&
-                 s.startTime.year == date.year &&
-                 s.startTime.month == date.month &&
-                 s.startTime.day == date.day;
-            debugPrint("[DateDebug] Compare with ${s.id}: code match=${s.subjectCode == subjectCode}, year=${s.startTime.year == date.year}, month=${s.startTime.month == date.month}, day=${s.startTime.day == date.day} -> matches=$matches");
-            return matches;
-          }
-        );
-        
-        debugPrint("[DateDebug] Match index: $matchIdx");
-        if (matchIdx != -1) {
-          final match = fetchedSessions[matchIdx];
+        // Find matches (ignore deletedSessionIds here so we can retrieve and restore it when explicitly requested via dashboard/details today)
+        final matches = fetchedSessions.where((s) {
+          return s.subjectCode == subjectCode &&
+              s.startTime.year == date.year &&
+              s.startTime.month == date.month &&
+              s.startTime.day == date.day;
+        }).toList();
+
+        if (matches.isNotEmpty) {
+          // Return the first matching session and restore it (remove from deletedSessionIds)
+          final match = matches.first;
+          deletedSessionIds.remove(match.id);
           
           final existingIdx = pastSessions.indexWhere((s) => s.id == match.id);
           if (existingIdx != -1) {
@@ -528,13 +675,11 @@ class AttendanceProvider with ChangeNotifier {
           } else {
             pastSessions.add(match);
           }
-          
           await _saveData();
           notifyListeners();
           return match;
-        } else {
-          notifyListeners();
         }
+        notifyListeners();
       } else {
         isServerConnectionActive = false;
         notifyListeners();
@@ -667,92 +812,37 @@ class AttendanceProvider with ChangeNotifier {
     notifyListeners();
 
     try {
-      bool isAvailable =
-          await NfcManager.instance.checkAvailability() ==
-          NfcAvailability.enabled;
-      if (!isAvailable) {
-        scanMessage =
-            "NFC is not available on this device.\nSimulating scan instead.";
-        notifyListeners();
-        Future.delayed(const Duration(seconds: 3), () {
-          if (isScanning) simulateNfcScan('tag_1');
-        });
-        return;
-      }
-
-      await NfcManager.instance.startSession(
-        pollingOptions: {
-          NfcPollingOption.iso14443,
-          NfcPollingOption.iso15693,
-          if (Platform.isAndroid) NfcPollingOption.iso18092,
-        },
-        onDiscovered: (NfcTag tag) async {
-          final uid = _extractTagUid(tag);
-          if (uid != null) {
+      if (Platform.isAndroid) {
+        await _nfcChannel.invokeMethod('startNfc');
+        _nfcSubscription?.cancel();
+        _nfcSubscription = _nfcEventChannel.receiveBroadcastStream().listen((dynamic uid) {
+          if (uid is String) {
             handleScannedTag(uid);
           } else {
             scanMessage = "Failed to parse card ID";
             notifyListeners();
           }
-        },
-      );
+        });
+      } else {
+        scanMessage = "NFC is not available on this device.\nSimulating scan instead.";
+        notifyListeners();
+        Future.delayed(const Duration(seconds: 3), () {
+          if (isScanning) simulateNfcScan('tag_1');
+        });
+      }
     } catch (e) {
       scanMessage = "Error initializing NFC";
       notifyListeners();
     }
   }
 
-  String? _extractTagUid(NfcTag tag) {
-    // ignore: invalid_use_of_protected_member
-    final Map<dynamic, dynamic> data = tag.data as Map<dynamic, dynamic>;
-    List<dynamic>? identifier;
-
-    // 1. Dynamic check: search all keys that contain a Map and have 'identifier'
-    for (final value in data.values) {
-      if (value is Map && value.containsKey('identifier')) {
-        final id = value['identifier'];
-        if (id is List) {
-          identifier = id;
-          break;
-        }
-      }
-    }
-
-    // 2. Explicit fallbacks
-    if (identifier == null) {
-      if (data.containsKey('nfca')) {
-        identifier = (data['nfca'] as Map?)?['identifier'];
-      } else if (data.containsKey('mifareclassic')) {
-        identifier = (data['mifareclassic'] as Map?)?['identifier'];
-      } else if (data.containsKey('mifareultralight')) {
-        identifier = (data['mifareultralight'] as Map?)?['identifier'];
-      } else if (data.containsKey('mifare')) {
-        identifier = (data['mifare'] as Map?)?['identifier'];
-      } else if (data.containsKey('nfcb')) {
-        identifier = (data['nfcb'] as Map?)?['identifier'];
-      } else if (data.containsKey('nfcv')) {
-        identifier = (data['nfcv'] as Map?)?['identifier'];
-      } else if (data.containsKey('nfcf')) {
-        identifier = (data['nfcf'] as Map?)?['identifier'];
-      } else if (data.containsKey('isodep')) {
-        identifier = (data['isodep'] as Map?)?['identifier'];
-      } else if (data.containsKey('ndef')) {
-        identifier = (data['ndef'] as Map?)?['identifier'];
-      }
-    }
-
-    if (identifier != null) {
-      return identifier
-          .map((e) => (e as int).toRadixString(16).padLeft(2, '0').toUpperCase())
-          .join(':');
-    }
-    return null;
-  }
-
   void stopNfcScanning() {
     isScanning = false;
     scanMessage = null;
-    NfcManager.instance.stopSession();
+    _nfcSubscription?.cancel();
+    if (Platform.isAndroid) {
+      _nfcChannel.invokeMethod('stopNfc').catchError((_) {});
+    }
     notifyListeners();
   }
 
@@ -773,13 +863,14 @@ class AttendanceProvider with ChangeNotifier {
 
     if (currentSession == null) return;
 
+    final normalizedScanned = _normalizeUid(deviceId);
     final matchIdx = currentSession!.students.indexWhere(
-      (s) => s.deviceId == deviceId,
+      (s) => _normalizeUid(s.deviceId) == normalizedScanned,
     );
     if (matchIdx != -1) {
       _markStudentPresent(currentSession!.students[matchIdx]);
     } else {
-      scanMessage = "Unrecognized Student Card\nUID: $deviceId";
+      scanMessage = "Unrecognized Student Card\nUID: $normalizedScanned";
       notifyListeners();
     }
   }
@@ -854,6 +945,7 @@ class AttendanceProvider with ChangeNotifier {
     }
     
     final newSessionId = 'past_${subjectCode}_${date.year}${date.month.toString().padLeft(2, '0')}${date.day.toString().padLeft(2, '0')}';
+    deletedSessionIds.remove(newSessionId);
     
     final newSession = ClassSession(
       id: newSessionId,
@@ -908,7 +1000,10 @@ class AttendanceProvider with ChangeNotifier {
     if (idx == -1) return "Session not found";
     
     final session = pastSessions[idx];
-    final studentIdx = session.students.indexWhere((s) => s.deviceId == deviceId);
+    final normalizedScanned = _normalizeUid(deviceId);
+    final studentIdx = session.students.indexWhere(
+      (s) => _normalizeUid(s.deviceId) == normalizedScanned,
+    );
     if (studentIdx == -1) {
       return "Card not registered\nto this class";
     }
@@ -940,13 +1035,31 @@ class AttendanceProvider with ChangeNotifier {
 
   // Deletes a single past session from history (local app history only)
   Future<void> deletePastSession(String sessionId) async {
+    final sessionIdx = pastSessions.indexWhere((s) => s.id == sessionId);
+    if (sessionIdx != -1) {
+      final session = pastSessions[sessionIdx];
+      if (!deletedSessionsCache.any((s) => s.id == sessionId)) {
+        deletedSessionsCache.add(session);
+      }
+    }
     pastSessions.removeWhere((s) => s.id == sessionId);
+    if (!deletedSessionIds.contains(sessionId)) {
+      deletedSessionIds.add(sessionId);
+    }
     await _saveData();
     notifyListeners();
   }
 
   // Clears all past sessions from history (local app history only)
   Future<void> clearAllPastSessions() async {
+    for (var s in pastSessions) {
+      if (!deletedSessionsCache.any((cached) => cached.id == s.id)) {
+        deletedSessionsCache.add(s);
+      }
+      if (!deletedSessionIds.contains(s.id)) {
+        deletedSessionIds.add(s.id);
+      }
+    }
     pastSessions.clear();
     await _saveData();
     notifyListeners();
@@ -1002,7 +1115,7 @@ class AttendanceProvider with ChangeNotifier {
   }
 
   // Auto-scans local subnet IPs (e.g. 192.168.1.x or 10.x.x.x) to locate the XAMPP backend
-  Future<String?> autoDiscoverServer() async {
+  Future<DiscoveredServer?> autoDiscoverServer() async {
     try {
       final interfaces = await NetworkInterface.list(
         type: InternetAddressType.IPv4,
@@ -1032,18 +1145,25 @@ class AttendanceProvider with ChangeNotifier {
       if (parts.length != 4) return null;
       final subnetPrefix = '${parts[0]}.${parts[1]}.${parts[2]}';
 
-      // Perform a fast concurrent subnet scan
-      final List<Future<String?>> scanFutures = [];
+      // Perform a fast concurrent subnet scan checking the handshake endpoint
+      final List<Future<DiscoveredServer?>> scanFutures = [];
       for (int i = 1; i <= 254; i++) {
         final ipToTest = '$subnetPrefix.$i';
         if (ipToTest == localIp) continue;
 
         scanFutures.add(
-          http.get(Uri.parse('http://$ipToTest/tap_attend/api/db_connect.php'))
+          http.get(Uri.parse('http://$ipToTest/tap_attend/api/handshake.php'))
               .timeout(const Duration(milliseconds: 1000))
               .then((response) {
                 if (response.statusCode == 200) {
-                  return ipToTest;
+                  final data = jsonDecode(response.body);
+                  if (data['success'] == true && data['app'] == 'tap_attend') {
+                    return DiscoveredServer(
+                      ip: ipToTest,
+                      name: data['server_name'] ?? 'Tap Attend Server',
+                      token: data['server_token'] ?? '',
+                    );
+                  }
                 }
                 return null;
               })
@@ -1052,12 +1172,23 @@ class AttendanceProvider with ChangeNotifier {
       }
 
       final results = await Future.wait(scanFutures);
-      for (var result in results) {
-        if (result != null) {
-          await updateServerIp(result);
-          return result;
+      final foundServers = results.whereType<DiscoveredServer>().toList();
+      if (foundServers.isEmpty) return null;
+
+      // If we already have a trusted server token, try to find a matching one first
+      if (trustedServerToken != null) {
+        for (var server in foundServers) {
+          if (server.token == trustedServerToken) {
+            // Match found! Auto-reconnect silently.
+            await updateServerIp(server.ip);
+            return server;
+          }
         }
       }
+
+      // No matching trusted server found or first time connecting.
+      // Return the first discovered server candidate for user confirmation.
+      return foundServers.first;
     } catch (_) {}
     return null;
   }
@@ -1086,6 +1217,7 @@ class AttendanceProvider with ChangeNotifier {
             lecturer = Lecturer.fromJson(data['lecturer']);
             cachedLecturerId = idClean;
             cachedPassword = pwdClean;
+            nfcLoginCardUid = lecturer?.cardUid != null ? _normalizeUid(lecturer!.cardUid!) : null;
             await _saveData();
             // Store the lecturer profile in a persistent cache so it's not lost on sign out
             final prefs = await SharedPreferences.getInstance();
@@ -1113,6 +1245,7 @@ class AttendanceProvider with ChangeNotifier {
             lecturer = parsed;
           }
         }
+        nfcLoginCardUid = lecturer?.cardUid != null ? _normalizeUid(lecturer!.cardUid!) : null;
         notifyListeners();
         return true;
       }
@@ -1123,7 +1256,7 @@ class AttendanceProvider with ChangeNotifier {
 
   Future<bool> loginWithNfc(String cardUid) async {
     try {
-      final cardUidClean = cardUid.trim();
+      final cardUidClean = _normalizeUid(cardUid);
       if (cardUidClean.isEmpty) return false;
 
       // 1. Try online login first if server connection is active
@@ -1139,6 +1272,7 @@ class AttendanceProvider with ChangeNotifier {
             if (data['success'] == true) {
               lecturer = Lecturer.fromJson(data['lecturer']);
               cachedLecturerId = lecturer!.id;
+              nfcLoginCardUid = cardUidClean;
               await _saveData();
               // Store the lecturer profile in a persistent cache so it's not lost on sign out
               final prefs = await SharedPreferences.getInstance();
@@ -1160,8 +1294,9 @@ class AttendanceProvider with ChangeNotifier {
         if (cachedLecturer.id.isEmpty && cachedLecturerId != null) {
           cachedLecturer = cachedLecturer.copyWith(id: cachedLecturerId);
         }
-        if (cachedLecturer.cardUid != null && cachedLecturer.cardUid == cardUidClean) {
+        if (cachedLecturer.cardUid != null && _normalizeUid(cachedLecturer.cardUid!) == cardUidClean) {
           lecturer = cachedLecturer;
+          nfcLoginCardUid = cardUidClean;
           notifyListeners();
           return true;
         }
@@ -1175,12 +1310,27 @@ class AttendanceProvider with ChangeNotifier {
 
   Future<void> signOutLecturer() async {
     lecturer = null;
+    nfcLoginCardUid = null;
     // We do NOT clear cachedLecturerId, cachedPassword, or cachedLecturer,
     // so they remain available for offline login even after signing out.
     
     final prefs = await SharedPreferences.getInstance();
     await prefs.remove('lecturer');
+    await prefs.remove('nfcLoginCardUid');
     
     notifyListeners();
   }
 }
+
+class DiscoveredServer {
+  final String ip;
+  final String name;
+  final String token;
+
+  DiscoveredServer({
+    required this.ip,
+    required this.name,
+    required this.token,
+  });
+}
+

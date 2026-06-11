@@ -1,11 +1,12 @@
 import 'dart:io';
+import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
-import 'package:nfc_manager/nfc_manager.dart';
 import 'package:tap_attend/providers/attendance_provider.dart';
 import 'package:tap_attend/models/student.dart';
 
-enum RegistrationStep { scanning, unrecognizedPrompt, formEntry, alreadyRegistered }
+enum RegistrationStep { scanning, unrecognizedPrompt, formEntry, alreadyRegistered, lecturerCard }
 
 class CardRegistrationScreen extends StatefulWidget {
   const CardRegistrationScreen({super.key});
@@ -29,6 +30,10 @@ class _CardRegistrationScreenState extends State<CardRegistrationScreen>
   String _selectedClassCode = 'CS101'; // Default
 
   bool _isScanningActive = false;
+
+  static const MethodChannel _nfcChannel = MethodChannel('com.example.tap_attend/nfc');
+  static const EventChannel _nfcEventChannel = EventChannel('com.example.tap_attend/nfc_events');
+  StreamSubscription? _nfcSubscription;
 
   @override
   void initState() {
@@ -56,27 +61,15 @@ class _CardRegistrationScreenState extends State<CardRegistrationScreen>
     _isScanningActive = true;
 
     try {
-      bool isAvailable =
-          await NfcManager.instance.checkAvailability() ==
-          NfcAvailability.enabled;
-      if (!isAvailable) {
-        // Fallback: Show simulation scanner
-        return;
-      }
-
-      await NfcManager.instance.startSession(
-        pollingOptions: {
-          NfcPollingOption.iso14443,
-          NfcPollingOption.iso15693,
-          if (Platform.isAndroid) NfcPollingOption.iso18092,
-        },
-        onDiscovered: (NfcTag tag) async {
-          final uid = _extractUid(tag);
-          if (uid != null) {
+      if (Platform.isAndroid) {
+        await _nfcChannel.invokeMethod('startNfc');
+        _nfcSubscription?.cancel();
+        _nfcSubscription = _nfcEventChannel.receiveBroadcastStream().listen((dynamic uid) {
+          if (uid is String) {
             _handleDiscoveredUid(uid);
           }
-        },
-      );
+        });
+      }
     } catch (_) {
       // Handle NFC error quietly
     }
@@ -85,59 +78,39 @@ class _CardRegistrationScreenState extends State<CardRegistrationScreen>
   void _stopNfcScan() {
     if (!_isScanningActive) return;
     _isScanningActive = false;
-    NfcManager.instance.stopSession();
+    _nfcSubscription?.cancel();
+    if (Platform.isAndroid) {
+      _nfcChannel.invokeMethod('stopNfc').catchError((_) {});
+    }
   }
 
-  String? _extractUid(NfcTag tag) {
-    // ignore: invalid_use_of_protected_member
-    final Map<dynamic, dynamic> data = tag.data as Map<dynamic, dynamic>;
-    List<dynamic>? identifier;
-
-    // 1. Dynamic check: search all keys that contain a Map and have 'identifier'
-    for (final value in data.values) {
-      if (value is Map && value.containsKey('identifier')) {
-        final id = value['identifier'];
-        if (id is List) {
-          identifier = id;
-          break;
-        }
-      }
-    }
-
-    // 2. Explicit fallbacks
-    if (identifier == null) {
-      if (data.containsKey('nfca')) {
-        identifier = (data['nfca'] as Map?)?['identifier'];
-      } else if (data.containsKey('mifareclassic')) {
-        identifier = (data['mifareclassic'] as Map?)?['identifier'];
-      } else if (data.containsKey('mifareultralight')) {
-        identifier = (data['mifareultralight'] as Map?)?['identifier'];
-      } else if (data.containsKey('mifare')) {
-        identifier = (data['mifare'] as Map?)?['identifier'];
-      } else if (data.containsKey('nfcb')) {
-        identifier = (data['nfcb'] as Map?)?['identifier'];
-      } else if (data.containsKey('nfcv')) {
-        identifier = (data['nfcv'] as Map?)?['identifier'];
-      } else if (data.containsKey('nfcf')) {
-        identifier = (data['nfcf'] as Map?)?['identifier'];
-      } else if (data.containsKey('isodep')) {
-        identifier = (data['isodep'] as Map?)?['identifier'];
-      } else if (data.containsKey('ndef')) {
-        identifier = (data['ndef'] as Map?)?['identifier'];
-      }
-    }
-
-    if (identifier != null) {
-      return identifier
-          .map((e) => (e as int).toRadixString(16).padLeft(2, '0').toUpperCase())
-          .join(':');
-    }
-    return null;
+  String _normalizeUid(String uid) {
+    return uid.trim().replaceAll(':', '').replaceAll(' ', '').replaceAll('-', '').toUpperCase();
   }
 
   void _handleDiscoveredUid(String uid) {
     _stopNfcScan();
     final provider = context.read<AttendanceProvider>();
+
+    final normalizedScanned = _normalizeUid(uid);
+    final lecturerCard = provider.lecturer?.cardUid;
+    final nfcLoginCard = provider.nfcLoginCardUid;
+
+    debugPrint("CardRegistrationScreen: Scanned UID: $normalizedScanned");
+    debugPrint("CardRegistrationScreen: Lecturer Profile Card UID: ${lecturerCard != null ? _normalizeUid(lecturerCard) : null}");
+    debugPrint("CardRegistrationScreen: Lecturer Login Card UID: $nfcLoginCard");
+
+    final isLecturerCard = (lecturerCard != null && _normalizeUid(lecturerCard) == normalizedScanned) ||
+                           (nfcLoginCard != null && _normalizeUid(nfcLoginCard) == normalizedScanned);
+
+    if (isLecturerCard) {
+      setState(() {
+        _scannedUid = uid;
+        _step = RegistrationStep.lecturerCard;
+      });
+      return;
+    }
+
     final student = provider.checkCardRegistration(uid);
 
     setState(() {
@@ -200,10 +173,6 @@ class _CardRegistrationScreenState extends State<CardRegistrationScreen>
     }
   }
 
-  // Simulate NFC scan for emulator testing
-  void _simulateScan(String mockUid) {
-    _handleDiscoveredUid(mockUid);
-  }
 
   @override
   Widget build(BuildContext context) {
@@ -274,6 +243,8 @@ class _CardRegistrationScreenState extends State<CardRegistrationScreen>
         return _buildFormEntryWidget();
       case RegistrationStep.alreadyRegistered:
         return _buildAlreadyRegisteredWidget();
+      case RegistrationStep.lecturerCard:
+        return _buildLecturerCardWidget();
     }
   }
 
@@ -326,26 +297,6 @@ class _CardRegistrationScreenState extends State<CardRegistrationScreen>
           ),
         ),
         const SizedBox(height: 48),
-
-        // Simulator button for testing
-        OutlinedButton.icon(
-          onPressed: () {
-            // Generate a random UID for testing (or a fixed tag index)
-            final randomId = 'MOCK:${DateTime.now().millisecond}';
-            _simulateScan(randomId);
-          },
-          icon: const Icon(Icons.developer_mode),
-          label: const Text('Simulate Tag Scan (Emulator)'),
-        ),
-        const SizedBox(height: 16),
-        OutlinedButton.icon(
-          onPressed: () {
-            // Simulate scanning an already registered card (tag_1)
-            _simulateScan('tag_1');
-          },
-          icon: const Icon(Icons.check_circle_outline),
-          label: const Text('Simulate Scan: Existing Student'),
-        ),
       ],
     );
   }
@@ -462,7 +413,7 @@ class _CardRegistrationScreenState extends State<CardRegistrationScreen>
                 hintText: 'e.g. 104, 204, 304',
                 prefixIcon: Icon(Icons.badge_outlined),
               ),
-              keyboardType: TextInputType.number,
+              keyboardType: TextInputType.text,
               validator: (value) {
                 if (value == null || value.trim().isEmpty) {
                   return 'Please enter student ID';
@@ -480,14 +431,33 @@ class _CardRegistrationScreenState extends State<CardRegistrationScreen>
             Text('Class Enrollment', style: Theme.of(context).textTheme.bodyMedium),
             const SizedBox(height: 8),
             DropdownButtonFormField<String>(
+              isExpanded: true,
               initialValue: _selectedClassCode,
               decoration: const InputDecoration(
                 prefixIcon: Icon(Icons.school_outlined),
               ),
               items: const [
-                DropdownMenuItem(value: 'CS101', child: Text('CS101 - Computer Science 101')),
-                DropdownMenuItem(value: 'CS202', child: Text('CS202 - Advanced Algorithms')),
-                DropdownMenuItem(value: 'CS303', child: Text('CS303 - Data Structures')),
+                DropdownMenuItem(
+                  value: 'CS101',
+                  child: Text(
+                    'CS101 - Computer Science 101',
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+                DropdownMenuItem(
+                  value: 'CS202',
+                  child: Text(
+                    'CS202 - Advanced Algorithms',
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+                DropdownMenuItem(
+                  value: 'CS303',
+                  child: Text(
+                    'CS303 - Data Structures',
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
               ],
               onChanged: (value) {
                 if (value != null) {
@@ -576,6 +546,63 @@ class _CardRegistrationScreenState extends State<CardRegistrationScreen>
             title: const Text('ENROLLED CLASS', style: TextStyle(color: Colors.grey, fontSize: 10, letterSpacing: 1, fontWeight: FontWeight.bold)),
             subtitle: Text('$_existingClassCode - $classLabel', style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
             contentPadding: EdgeInsets.zero,
+          ),
+          const SizedBox(height: 32),
+
+          ElevatedButton(
+            onPressed: _resetScanner,
+            style: ElevatedButton.styleFrom(
+              padding: const EdgeInsets.symmetric(vertical: 16),
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+            ),
+            child: const Text('Scan Another Card'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildLecturerCardWidget() {
+    final lecturer = context.read<AttendanceProvider>().lecturer!;
+    return Container(
+      padding: const EdgeInsets.all(24),
+      decoration: BoxDecoration(
+        color: Theme.of(context).cardColor,
+        borderRadius: BorderRadius.circular(20),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          const Icon(Icons.admin_panel_settings, color: Colors.blue, size: 56),
+          const SizedBox(height: 16),
+          const Text(
+            'Lecturer Card Detected',
+            textAlign: TextAlign.center,
+            style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            'UID: $_scannedUid',
+            textAlign: TextAlign.center,
+            style: const TextStyle(fontFamily: 'monospace', color: Colors.grey, fontSize: 12),
+          ),
+          const Divider(height: 32),
+          
+          ListTile(
+            title: const Text('LECTURER NAME', style: TextStyle(color: Colors.grey, fontSize: 10, letterSpacing: 1, fontWeight: FontWeight.bold)),
+            subtitle: Text(lecturer.name, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+            contentPadding: EdgeInsets.zero,
+          ),
+          ListTile(
+            title: const Text('DEPARTMENT', style: TextStyle(color: Colors.grey, fontSize: 10, letterSpacing: 1, fontWeight: FontWeight.bold)),
+            subtitle: Text(lecturer.department, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+            contentPadding: EdgeInsets.zero,
+          ),
+          const SizedBox(height: 24),
+          const Text(
+            'This card is registered to you (the logged-in Lecturer) and cannot be assigned to a student.',
+            textAlign: TextAlign.center,
+            style: TextStyle(color: Colors.orange, fontSize: 13, height: 1.4, fontWeight: FontWeight.w500),
           ),
           const SizedBox(height: 32),
 

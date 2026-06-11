@@ -18,7 +18,7 @@ if (!$cardUid) {
 }
 
 // Query lecturer by card_uid
-$stmt = $conn->prepare("SELECT lecturer_id, name, email, department, office, phone, card_uid FROM lecturers WHERE card_uid = ?");
+$stmt = $conn->prepare("SELECT lecturer_id, name, email, department, office, phone, card_uid FROM lecturers WHERE REPLACE(REPLACE(UPPER(card_uid), ':', ''), ' ', '') = ?");
 $stmt->bind_param("s", $cardUid);
 $stmt->execute();
 $result = $stmt->get_result();

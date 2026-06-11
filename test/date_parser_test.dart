@@ -178,4 +178,116 @@ void main() {
       expect(provider.lecturer!.name, equals('Mr. Sharvin Ganeson'));
     });
   });
+
+  group('Session History Multiple and Deletion Tests', () {
+    test('Offline multiple sessions should have different IDs and deleting one should preserve the other', () async {
+      SharedPreferences.setMockInitialValues({});
+      final provider = AttendanceProvider();
+      await provider.initializationFuture;
+
+      // Clear any default mock sessions
+      provider.pastSessions.clear();
+
+      // 1. Load and end first session
+      provider.loadSessionByCode('CS101');
+      final firstSessionId = provider.currentSession!.id;
+      await provider.finishSession();
+
+      // Wait 2ms to ensure timestamp difference
+      await Future.delayed(const Duration(milliseconds: 2));
+
+      // 2. Load and end second session
+      provider.loadSessionByCode('CS101');
+      final secondSessionId = provider.currentSession!.id;
+      await provider.finishSession();
+
+      // Verify they have different IDs
+      expect(firstSessionId, isNot(equals(secondSessionId)));
+      expect(provider.pastSessions.length, equals(2));
+      expect(provider.pastSessions[0].id, equals(firstSessionId));
+      expect(provider.pastSessions[1].id, equals(secondSessionId));
+
+      // 3. Delete the second session
+      await provider.deletePastSession(secondSessionId);
+
+      // Verify only the second session is deleted and the first remains
+      expect(provider.pastSessions.length, equals(1));
+      expect(provider.pastSessions[0].id, equals(firstSessionId));
+    });
+
+    test('deletedSessionIds should persist and filter out matching session IDs', () async {
+      SharedPreferences.setMockInitialValues({});
+      final provider = AttendanceProvider();
+      await provider.initializationFuture;
+
+      provider.pastSessions.clear();
+      provider.deletedSessionIds.clear();
+
+      final session = ClassSession(
+        id: 's1_999999',
+        subjectCode: 'CS101',
+        subjectName: 'Computer Science 101',
+        room: 'Lab 3, Engineering Building',
+        startTime: DateTime.now(),
+        endTime: DateTime.now().add(const Duration(hours: 1)),
+        totalEnrolled: 3,
+        previousAverageScore: 88,
+        students: [],
+      );
+
+      provider.pastSessions.add(session);
+      await provider.deletePastSession('s1_999999');
+
+      expect(provider.pastSessions, isEmpty);
+      expect(provider.deletedSessionIds, contains('s1_999999'));
+
+      // Simulate a reload by starting a new provider instance
+      final provider2 = AttendanceProvider();
+      await provider2.initializationFuture;
+
+      expect(provider2.deletedSessionIds, contains('s1_999999'));
+      expect(provider2.pastSessions, isEmpty);
+    });
+
+    test('Offline restoration of deleted session today should work and recover full session details', () async {
+      SharedPreferences.setMockInitialValues({});
+      final provider = AttendanceProvider();
+      await provider.initializationFuture;
+
+      provider.pastSessions.clear();
+      provider.deletedSessionIds.clear();
+      provider.deletedSessionsCache.clear();
+
+      final today = DateTime.now();
+      final session = ClassSession(
+        id: 's1_123456',
+        subjectCode: 'CS101',
+        subjectName: 'Computer Science 101',
+        room: 'Lab 3, Engineering Building',
+        startTime: today,
+        endTime: today.add(const Duration(hours: 1)),
+        totalEnrolled: 3,
+        previousAverageScore: 88,
+        students: [],
+      );
+
+      provider.pastSessions.add(session);
+      await provider.deletePastSession('s1_123456');
+
+      expect(provider.pastSessions, isEmpty);
+      expect(provider.deletedSessionIds, contains('s1_123456'));
+      expect(provider.deletedSessionsCache.length, equals(1));
+
+      // Simulate being offline and tapping the card to take attendance today
+      // This will trigger checkAndFetchSessionFromServer which should restore from local cache!
+      final restoredSession = await provider.checkAndFetchSessionFromServer('CS101', today);
+
+      expect(restoredSession, isNotNull);
+      expect(restoredSession!.id, equals('s1_123456'));
+      expect(provider.pastSessions.length, equals(1));
+      expect(provider.deletedSessionIds, isNot(contains('s1_123456')));
+      expect(provider.deletedSessionsCache, isEmpty);
+    });
+  });
 }
+

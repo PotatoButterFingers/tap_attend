@@ -28,7 +28,9 @@ class _MainScreenState extends State<MainScreen> {
               children: [
                 Icon(Icons.exit_to_app, color: Colors.blue),
                 SizedBox(width: 8),
-                Text('Exit App'),
+                Expanded(
+                  child: Text('Exit App'),
+                ),
               ],
             ),
             content: const Text('Are you sure you want to exit TapAttend?'),

@@ -1,6 +1,7 @@
 import 'dart:io';
+import 'dart:async';
 import 'package:flutter/material.dart';
-import 'package:nfc_manager/nfc_manager.dart';
+import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import 'package:tap_attend/providers/attendance_provider.dart';
 import 'package:tap_attend/screens/main_screen.dart';
@@ -19,6 +20,10 @@ class _NfcLoginScreenState extends State<NfcLoginScreen> with SingleTickerProvid
   bool _isProcessing = false;
   String _statusMessage = "Ready to Scan";
   String? _errorMessage;
+
+  static const MethodChannel _nfcChannel = MethodChannel('com.example.tap_attend/nfc');
+  static const EventChannel _nfcEventChannel = EventChannel('com.example.tap_attend/nfc_events');
+  StreamSubscription? _nfcSubscription;
 
   @override
   void initState() {
@@ -52,45 +57,31 @@ class _NfcLoginScreenState extends State<NfcLoginScreen> with SingleTickerProvid
     }
 
     try {
-      bool isAvailable = await NfcManager.instance.checkAvailability() == NfcAvailability.enabled;
-      if (!isAvailable) {
+      if (Platform.isAndroid) {
+        await _nfcChannel.invokeMethod('startNfc');
+        _nfcSubscription?.cancel();
+        _nfcSubscription = _nfcEventChannel.receiveBroadcastStream().listen((dynamic uid) async {
+          if (uid is String) {
+            if (mounted) {
+              ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(
+                  content: Text('Card detected! UID: $uid'),
+                  backgroundColor: Colors.blue,
+                  duration: const Duration(seconds: 2),
+                ),
+              );
+            }
+            await _handleNfcLogin(uid);
+          }
+        });
+      } else {
         if (mounted) {
           setState(() {
             _isScanning = false;
-            _statusMessage = "NFC is not supported or disabled on this device.\nPlease use the simulation button below.";
+            _statusMessage = "NFC scanning is currently configured for Android only.\nPlease use the simulation button below.";
           });
         }
-        return;
       }
-
-      await NfcManager.instance.startSession(
-        pollingOptions: {
-          NfcPollingOption.iso14443,
-          NfcPollingOption.iso15693,
-          if (Platform.isAndroid) NfcPollingOption.iso18092,
-        },
-        onDiscovered: (NfcTag tag) async {
-          final uid = _extractTagUid(tag);
-          if (mounted) {
-            ScaffoldMessenger.of(context).showSnackBar(
-              SnackBar(
-                content: Text(uid != null ? 'Card detected! UID: $uid' : 'Card detected, but failed to parse UID.'),
-                backgroundColor: uid != null ? Colors.blue : Colors.orange,
-                duration: const Duration(seconds: 2),
-              ),
-            );
-          }
-          if (uid != null) {
-            await _handleNfcLogin(uid);
-          } else {
-            if (mounted) {
-              setState(() {
-                _errorMessage = "Could not read card serial number.";
-              });
-            }
-          }
-        },
-      );
     } catch (e) {
       if (mounted) {
         setState(() {
@@ -103,59 +94,16 @@ class _NfcLoginScreenState extends State<NfcLoginScreen> with SingleTickerProvid
 
   Future<void> _stopNfcSession() async {
     try {
-      await NfcManager.instance.stopSession();
+      _nfcSubscription?.cancel();
+      if (Platform.isAndroid) {
+        await _nfcChannel.invokeMethod('stopNfc');
+      }
     } catch (_) {}
   }
 
-  String? _extractTagUid(NfcTag tag) {
-    // ignore: invalid_use_of_protected_member
-    final Map<dynamic, dynamic> data = tag.data as Map<dynamic, dynamic>;
-    List<dynamic>? identifier;
-
-    // 1. Dynamic check: search all keys that contain a Map and have 'identifier'
-    for (final value in data.values) {
-      if (value is Map && value.containsKey('identifier')) {
-        final id = value['identifier'];
-        if (id is List) {
-          identifier = id;
-          break;
-        }
-      }
-    }
-
-    // 2. Explicit fallbacks
-    if (identifier == null) {
-      if (data.containsKey('nfca')) {
-        identifier = (data['nfca'] as Map?)?['identifier'];
-      } else if (data.containsKey('mifareclassic')) {
-        identifier = (data['mifareclassic'] as Map?)?['identifier'];
-      } else if (data.containsKey('mifareultralight')) {
-        identifier = (data['mifareultralight'] as Map?)?['identifier'];
-      } else if (data.containsKey('mifare')) {
-        identifier = (data['mifare'] as Map?)?['identifier'];
-      } else if (data.containsKey('nfcb')) {
-        identifier = (data['nfcb'] as Map?)?['identifier'];
-      } else if (data.containsKey('nfcv')) {
-        identifier = (data['nfcv'] as Map?)?['identifier'];
-      } else if (data.containsKey('nfcf')) {
-        identifier = (data['nfcf'] as Map?)?['identifier'];
-      } else if (data.containsKey('isodep')) {
-        identifier = (data['isodep'] as Map?)?['identifier'];
-      } else if (data.containsKey('ndef')) {
-        identifier = (data['ndef'] as Map?)?['identifier'];
-      }
-    }
-
-    if (identifier != null) {
-      return identifier
-          .map((e) => (e as int).toRadixString(16).padLeft(2, '0').toUpperCase())
-          .join(':');
-    }
-    return null;
-  }
-
   Future<void> _handleNfcLogin(String cardUid) async {
-    await _stopNfcSession();
+    // Do not await this, to avoid blocking the UI if the platform channel hangs
+    _stopNfcSession();
     if (!mounted) return;
 
     ScaffoldMessenger.of(context).showSnackBar(
@@ -233,6 +181,7 @@ class _NfcLoginScreenState extends State<NfcLoginScreen> with SingleTickerProvid
     final primaryColor = Theme.of(context).primaryColor;
 
     return Scaffold(
+      resizeToAvoidBottomInset: false,
       appBar: AppBar(
         title: const Text('NFC Card Sign In'),
         elevation: 0,
@@ -388,22 +337,24 @@ class _NfcLoginScreenState extends State<NfcLoginScreen> with SingleTickerProvid
       builder: (context) {
         return AlertDialog(
           title: const Text('Simulate NFC Card Scan'),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              const Text(
-                'Enter a mock card UID to simulate a scan. Default lecturer sharvin is seeded with "lecturer_card_1".',
-                style: TextStyle(fontSize: 13, color: Colors.grey),
-              ),
-              const SizedBox(height: 16),
-              TextField(
-                controller: controller,
-                decoration: const InputDecoration(
-                  labelText: 'Simulated Card UID',
-                  border: OutlineInputBorder(),
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Text(
+                  'Enter a mock card UID to simulate a scan. Default lecturer sharvin is seeded with "lecturer_card_1".',
+                  style: TextStyle(fontSize: 13, color: Colors.grey),
                 ),
-              ),
-            ],
+                const SizedBox(height: 16),
+                TextField(
+                  controller: controller,
+                  decoration: const InputDecoration(
+                    labelText: 'Simulated Card UID',
+                    border: OutlineInputBorder(),
+                  ),
+                ),
+              ],
+            ),
           ),
           actions: [
             TextButton(

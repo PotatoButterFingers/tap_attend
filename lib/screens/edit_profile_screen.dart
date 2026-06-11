@@ -1,6 +1,7 @@
 import 'dart:io';
+import 'dart:async';
 import 'package:flutter/material.dart';
-import 'package:nfc_manager/nfc_manager.dart';
+import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import 'package:tap_attend/providers/attendance_provider.dart';
 
@@ -21,6 +22,50 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
   late TextEditingController _cardUidController;
   bool _isSaving = false;
 
+  static const MethodChannel _nfcChannel = MethodChannel('com.example.tap_attend/nfc');
+  static const EventChannel _nfcEventChannel = EventChannel('com.example.tap_attend/nfc_events');
+  StreamSubscription? _nfcSubscription;
+  bool _isScanningActive = false;
+
+  Future<void> _startNfcSession() async {
+    if (_isScanningActive) return;
+    _isScanningActive = true;
+    try {
+      if (Platform.isAndroid) {
+        await _nfcChannel.invokeMethod('startNfc');
+        _nfcSubscription?.cancel();
+        _nfcSubscription = _nfcEventChannel.receiveBroadcastStream().listen((dynamic uid) {
+          if (uid is String) {
+            _stopNfcSession();
+            if (mounted) {
+              setState(() {
+                _cardUidController.text = uid;
+              });
+              Navigator.of(context, rootNavigator: true).pop(); // Dismiss dialog if open
+              ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(
+                  content: Text('NFC card scanned: $uid'),
+                  backgroundColor: Colors.green,
+                ),
+              );
+            }
+          }
+        });
+      }
+    } catch (_) {}
+  }
+
+  Future<void> _stopNfcSession() async {
+    if (!_isScanningActive) return;
+    _isScanningActive = false;
+    try {
+      _nfcSubscription?.cancel();
+      if (Platform.isAndroid) {
+        await _nfcChannel.invokeMethod('stopNfc');
+      }
+    } catch (_) {}
+  }
+
   @override
   void initState() {
     super.initState();
@@ -35,6 +80,7 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
 
   @override
   void dispose() {
+    _stopNfcSession();
     _nameController.dispose();
     _deptController.dispose();
     _emailController.dispose();
@@ -87,124 +133,66 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
   void _showScanCardDialog() {
     String status = "Ready to Scan.\nHold your NFC card to the back of your phone.";
     
-    try {
-      NfcManager.instance.startSession(
-        pollingOptions: {
-          NfcPollingOption.iso14443,
-          NfcPollingOption.iso15693,
-          if (Platform.isAndroid) NfcPollingOption.iso18092,
-        },
-        onDiscovered: (NfcTag tag) async {
-          // ignore: invalid_use_of_protected_member
-          final Map<dynamic, dynamic> data = tag.data as Map<dynamic, dynamic>;
-          List<dynamic>? identifier;
-
-          // 1. Dynamic check: search all keys that contain a Map and have 'identifier'
-          for (final value in data.values) {
-            if (value is Map && value.containsKey('identifier')) {
-              final id = value['identifier'];
-              if (id is List) {
-                identifier = id;
-                break;
-              }
-            }
-          }
-
-          // 2. Explicit fallbacks
-          if (identifier == null) {
-            if (data.containsKey('nfca')) {
-              identifier = (data['nfca'] as Map?)?['identifier'];
-            } else if (data.containsKey('mifareclassic')) {
-              identifier = (data['mifareclassic'] as Map?)?['identifier'];
-            } else if (data.containsKey('mifareultralight')) {
-              identifier = (data['mifareultralight'] as Map?)?['identifier'];
-            } else if (data.containsKey('mifare')) {
-              identifier = (data['mifare'] as Map?)?['identifier'];
-            } else if (data.containsKey('nfcb')) {
-              identifier = (data['nfcb'] as Map?)?['identifier'];
-            } else if (data.containsKey('nfcv')) {
-              identifier = (data['nfcv'] as Map?)?['identifier'];
-            } else if (data.containsKey('nfcf')) {
-              identifier = (data['nfcf'] as Map?)?['identifier'];
-            } else if (data.containsKey('isodep')) {
-              identifier = (data['isodep'] as Map?)?['identifier'];
-            } else if (data.containsKey('ndef')) {
-              identifier = (data['ndef'] as Map?)?['identifier'];
-            }
-          }
-
-          String? scannedUid;
-          if (identifier != null) {
-            scannedUid = identifier
-                .map((e) => (e as int).toRadixString(16).padLeft(2, '0').toUpperCase())
-                .join(':');
-          }
-
-          if (scannedUid != null) {
-            NfcManager.instance.stopSession();
-            if (mounted) {
-              setState(() {
-                _cardUidController.text = scannedUid!;
-              });
-              Navigator.pop(context);
-              ScaffoldMessenger.of(context).showSnackBar(
-                SnackBar(
-                  content: Text('NFC card scanned: $scannedUid'),
-                  backgroundColor: Colors.green,
-                ),
-              );
-            }
-          }
-        },
-      );
-    } catch (_) {}
+    _startNfcSession();
 
     showDialog(
       context: context,
       barrierDismissible: false,
       builder: (context) {
-        return AlertDialog(
-          title: const Text('Scan NFC Card'),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              const Icon(Icons.nfc, size: 64, color: Colors.blue),
-              const SizedBox(height: 16),
-              Text(
-                status,
-                textAlign: TextAlign.center,
-                style: const TextStyle(fontSize: 14),
-              ),
-              const SizedBox(height: 24),
-              ElevatedButton(
-                onPressed: () {
-                  NfcManager.instance.stopSession();
-                  Navigator.pop(context);
-                  _cardUidController.text = 'lecturer_card_99';
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(
-                      content: Text('Simulated scan: lecturer_card_99'),
-                      backgroundColor: Colors.amber,
-                    ),
-                  );
-                },
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: Colors.amber[700],
-                  foregroundColor: Colors.white,
+        return PopScope(
+          canPop: false,
+          onPopInvokedWithResult: (didPop, result) {
+            if (!didPop) {
+              _stopNfcSession();
+            }
+          },
+          child: AlertDialog(
+            title: const Text('Scan NFC Card'),
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Icon(Icons.nfc, size: 64, color: Colors.blue),
+                const SizedBox(height: 16),
+                Text(
+                  status,
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(fontSize: 14),
                 ),
-                child: const Text('Simulate Scan'),
+                const SizedBox(height: 24),
+                ElevatedButton(
+                  onPressed: () {
+                    _stopNfcSession();
+                    Navigator.pop(context);
+                    if (mounted) {
+                      setState(() {
+                        _cardUidController.text = 'lecturer_card_1';
+                      });
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(
+                          content: Text('Simulated scan: lecturer_card_1'),
+                          backgroundColor: Colors.amber,
+                        ),
+                      );
+                    }
+                  },
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Colors.amber[700],
+                    foregroundColor: Colors.white,
+                  ),
+                  child: const Text('Simulate Scan'),
+                ),
+              ],
+            ),
+            actions: [
+              TextButton(
+                onPressed: () {
+                  _stopNfcSession();
+                  Navigator.pop(context);
+                },
+                child: const Text('Cancel'),
               ),
             ],
           ),
-          actions: [
-            TextButton(
-              onPressed: () {
-                NfcManager.instance.stopSession();
-                Navigator.pop(context);
-              },
-              child: const Text('Cancel'),
-            ),
-          ],
         );
       },
     );
@@ -336,6 +324,24 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
                       ),
                     ),
                     const SizedBox(width: 12),
+                    if (_cardUidController.text.isNotEmpty) ...[
+                      OutlinedButton.icon(
+                        onPressed: _isSaving
+                            ? null
+                            : () {
+                                setState(() {
+                                  _cardUidController.clear();
+                                });
+                              },
+                        icon: const Icon(Icons.clear, color: Colors.red),
+                        label: const Text('Clear', style: TextStyle(color: Colors.red)),
+                        style: OutlinedButton.styleFrom(
+                          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
+                          side: const BorderSide(color: Colors.red),
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                    ],
                     ElevatedButton.icon(
                       onPressed: _isSaving ? null : _showScanCardDialog,
                       icon: const Icon(Icons.sensors),

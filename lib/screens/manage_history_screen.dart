@@ -13,7 +13,9 @@ class ManageHistoryScreen extends StatelessWidget {
           children: [
             Icon(Icons.warning_amber_rounded, color: Colors.red),
             SizedBox(width: 8),
-            Text('Delete Past Session?'),
+            Expanded(
+              child: Text('Delete Past Session?'),
+            ),
           ],
         ),
         content: Text(
@@ -54,7 +56,9 @@ class ManageHistoryScreen extends StatelessWidget {
           children: [
             Icon(Icons.gpp_maybe_outlined, color: Colors.red, size: 28),
             SizedBox(width: 8),
-            Text('Clear All History?'),
+            Expanded(
+              child: Text('Clear All History?'),
+            ),
           ],
         ),
         content: const Text(

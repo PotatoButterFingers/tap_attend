@@ -90,6 +90,43 @@ class _DashboardScreenState extends State<DashboardScreen> {
     return DateTime(date.year, date.month, date.day, 16, 45);
   }
 
+  Future<bool?> _showResumeOrNewDialog(BuildContext context, String subjectName) {
+    return showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Row(
+          children: [
+            Icon(Icons.info_outline, color: Colors.blue),
+            SizedBox(width: 8),
+            Expanded(
+              child: Text('Session Completed'),
+            ),
+          ],
+        ),
+        content: Text(
+          'An attendance session for $subjectName has already been recorded today.\n\nWould you like to resume the existing session or start a new session?',
+        ),
+        actionsOverflowDirection: VerticalDirection.down,
+        actionsOverflowButtonSpacing: 8,
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false), // Start New
+            child: const Text('Start New Session'),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(context, true), // Resume
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Theme.of(context).primaryColor,
+              foregroundColor: Colors.white,
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+            ),
+            child: const Text('Resume Session'),
+          ),
+        ],
+      ),
+    );
+  }
+
   Future<void> _handleClassTap(BuildContext context, String subjectCode, String subjectName) async {
     final provider = context.read<AttendanceProvider>();
     final now = DateTime.now();
@@ -97,22 +134,25 @@ class _DashboardScreenState extends State<DashboardScreen> {
     final selectedDateOnly = DateTime(_selectedDate.year, _selectedDate.month, _selectedDate.day);
     final todayOnly = DateTime(now.year, now.month, now.day);
     
-    // Check if the session is already in local pastSessions
-    final localIdx = provider.pastSessions.indexWhere((s) => 
-      s.subjectCode == subjectCode &&
-      s.startTime.year == _selectedDate.year &&
-      s.startTime.month == _selectedDate.month &&
-      s.startTime.day == _selectedDate.day
-    );
-
     ClassSession? session;
-    if (localIdx != -1) {
-      session = provider.pastSessions[localIdx];
+    if (provider.currentSession != null && provider.currentSession!.subjectCode == subjectCode) {
+      session = provider.currentSession;
     } else {
-      // If we are looking at a past day, OR today (even if upcoming/active):
-      // Always query the server first to check if a session already exists!
-      // This prevents overriding existing database records with blank sessions on timezone mismatch/clock out of sync.
-      if (selectedDateOnly.isBefore(todayOnly) || selectedDateOnly.isAtSameMomentAs(todayOnly)) {
+      // First check locally if we have a past session for this class today (checking newest first)
+      if (selectedDateOnly.isAtSameMomentAs(todayOnly)) {
+        for (var s in provider.pastSessions.reversed) {
+          if (s.subjectCode == subjectCode &&
+              s.startTime.year == todayOnly.year &&
+              s.startTime.month == todayOnly.month &&
+              s.startTime.day == todayOnly.day) {
+            session = s;
+            break;
+          }
+        }
+      }
+      
+      // If not found locally, or if we are looking at a past day, query the server
+      if (session == null && (selectedDateOnly.isBefore(todayOnly) || selectedDateOnly.isAtSameMomentAs(todayOnly))) {
         showDialog(
           context: context,
           barrierDismissible: false,
@@ -176,17 +216,35 @@ class _DashboardScreenState extends State<DashboardScreen> {
         );
       } else {
         // Today active or upcoming:
-        if (session != null) {
-          // If session already exists on the server, load it!
-          provider.loadSession(session);
+        // Check if the loaded session is already completed (i.e. present in pastSessions)
+        final tappedSession = session;
+        final bool isAlreadyCompleted = tappedSession != null && 
+            (provider.pastSessions.any((s) => s.id == tappedSession.id) || 
+             tappedSession.id.startsWith('past_'));
+        
+        if (isAlreadyCompleted) {
+          final resume = await _showResumeOrNewDialog(context, subjectName);
+          if (resume == null) return; // User closed dialog without choosing
+          
+          if (resume) {
+            provider.loadSession(tappedSession);
+          } else {
+            provider.loadSessionByCode(subjectCode);
+          }
+        } else if (tappedSession != null) {
+          // If active session exists, load it
+          provider.loadSession(tappedSession);
         } else {
           // Otherwise, initialize a new session
           provider.loadSessionByCode(subjectCode);
         }
-        Navigator.push(
-          context,
-          MaterialPageRoute(builder: (_) => const SessionOverviewScreen()),
-        );
+        
+        if (context.mounted) {
+          Navigator.push(
+            context,
+            MaterialPageRoute(builder: (_) => const SessionOverviewScreen()),
+          );
+        }
       }
     }
   }
@@ -199,7 +257,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
     String subjectName,
   ) async {
     // 1. Check if we already have it locally
-    final localIdx = provider.pastSessions.indexWhere(
+    final localIdx = provider.pastSessions.lastIndexWhere(
       (s) => s.subjectCode == subjectCode &&
              s.startTime.year == date.year &&
              s.startTime.month == date.month &&
@@ -286,7 +344,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
     
     if (selectedDateOnly.isBefore(todayOnly)) {
       // Past day
-      final existingIdx = provider.pastSessions.indexWhere((s) => 
+      final existingIdx = provider.pastSessions.lastIndexWhere((s) => 
         s.subjectCode == subjectCode &&
         s.startTime.year == _selectedDate.year &&
         s.startTime.month == _selectedDate.month &&
@@ -311,7 +369,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
       
       if (now.isAfter(classEnd)) {
         // Today but ended
-        final existingIdx = provider.pastSessions.indexWhere((s) => 
+        final existingIdx = provider.pastSessions.lastIndexWhere((s) => 
           s.subjectCode == subjectCode &&
           s.startTime.year == now.year &&
           s.startTime.month == now.month &&

@@ -57,7 +57,8 @@ class _SyncQueueScreenState extends State<SyncQueueScreen> {
 
       final totalPending = provider.pendingRegistrations.length +
           provider.pendingDeletions.length +
-          provider.unsyncedSessionIds.length;
+          provider.unsyncedSessionIds.length +
+          (provider.isLecturerProfileUnsynced ? 1 : 0);
 
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
@@ -80,7 +81,8 @@ class _SyncQueueScreenState extends State<SyncQueueScreen> {
     final int pendingRegsCount = provider.pendingRegistrations.length;
     final int pendingDelsCount = provider.pendingDeletions.length;
     final int pendingAttendanceCount = provider.unsyncedSessionIds.length;
-    final int totalPending = pendingRegsCount + pendingDelsCount + pendingAttendanceCount;
+    final bool hasPendingProfile = provider.isLecturerProfileUnsynced;
+    final int totalPending = pendingRegsCount + pendingDelsCount + pendingAttendanceCount + (hasPendingProfile ? 1 : 0);
 
     return Scaffold(
       appBar: AppBar(
@@ -247,6 +249,17 @@ class _SyncQueueScreenState extends State<SyncQueueScreen> {
                     Text('Pending Sync Details', style: Theme.of(context).textTheme.titleLarge),
                     const SizedBox(height: 16),
                     
+                    if (hasPendingProfile)
+                      _buildPendingCategory(
+                        title: 'PENDING PROFILE UPDATES',
+                        count: 1,
+                        color: Colors.amber[800] ?? Colors.amber,
+                        icon: Icons.account_circle,
+                        items: [
+                          'Lecturer Profile update for ${provider.lecturer?.name ?? "Lecturer"} (ID: ${provider.lecturer?.id ?? "N/A"})'
+                        ],
+                      ),
+
                     if (pendingAttendanceCount > 0)
                       _buildPendingCategory(
                         title: 'PENDING ATTENDANCE REPORTS',
@@ -313,7 +326,7 @@ class _SyncQueueScreenState extends State<SyncQueueScreen> {
         const Padding(
           padding: EdgeInsets.symmetric(horizontal: 32),
           child: Text(
-            'All student registrations, student deletions, and class attendance logs are fully up-to-date with your local XAMPP server.',
+            'All student registrations, student deletions, class attendance logs, and your lecturer profile are fully up-to-date with your local XAMPP server.',
             textAlign: TextAlign.center,
             style: TextStyle(color: Colors.grey, fontSize: 13, height: 1.5),
           ),
